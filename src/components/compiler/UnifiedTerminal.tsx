@@ -70,14 +70,14 @@ export function UnifiedTerminal({
   const [isDragging, setIsDragging] = useState(false);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const terminalEndRef = useRef<HTMLDivElement | null>(null);
+  const terminalScrollRef = useRef<HTMLDivElement | null>(null);
   const startDragYRef = useRef<number>(0);
   const startHeightRef = useRef<number>(typeof height === "number" ? height : 260);
 
-  // Auto-scroll terminal stream as new output/input arrives
+  // Auto-scroll terminal stream directly to bottom without disruptive smooth-scroll animations
   useEffect(() => {
-    if (!isCollapsed && (activeTab === "terminal" || activeTab === "output")) {
-      terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!isCollapsed && (activeTab === "terminal" || activeTab === "output") && terminalScrollRef.current) {
+      terminalScrollRef.current.scrollTop = terminalScrollRef.current.scrollHeight;
     }
   }, [stdout, stderr, terminalEntries, isCollapsed, activeTab]);
 
@@ -413,14 +413,16 @@ export function UnifiedTerminal({
       </div>
 
       {/* Console Tab Content */}
-      <div className="flex-1 overflow-y-auto flex flex-col min-h-0 bg-[#f8fafc] dark:bg-[#070b14] transition-colors">
+      <div className="flex-1 flex flex-col min-h-0 bg-[#f8fafc] dark:bg-[#070b14] transition-colors overflow-hidden">
         {/* TAB 1: INTERACTIVE TERMINAL */}
         {activeTab === "terminal" && (
-          <div
-            onClick={() => inputRef.current?.focus()}
-            className="flex-1 p-2.5 sm:p-4 flex flex-col justify-between overflow-y-auto cursor-text font-mono text-[11px] sm:text-xs leading-relaxed"
-          >
-            <div className="space-y-1 sm:space-y-1.5">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            {/* Scrollable Output Viewport */}
+            <div
+              ref={terminalScrollRef}
+              onClick={() => inputRef.current?.focus()}
+              className="flex-1 p-2.5 sm:p-4 overflow-y-auto cursor-text font-mono text-[11px] sm:text-xs leading-relaxed space-y-1 sm:space-y-1.5"
+            >
               {/* If nothing run yet */}
               {terminalEntries.length === 0 && !stdout && !stderr && status === "idle" && (
                 <div className="py-6 sm:py-8 text-center text-slate-500">
@@ -501,8 +503,8 @@ export function UnifiedTerminal({
               )}
             </div>
 
-            {/* Interactive Live Input Bar (Refined Console Input Dock) */}
-            <div className="mt-2.5 sm:mt-4 p-1.5 sm:p-2 rounded-xl sm:rounded-2xl border border-slate-200/90 dark:border-white/[0.08] bg-[#f1f5f9] dark:bg-[#0b1120] flex items-center gap-1.5 sm:gap-2 shadow-xs transition-colors">
+            {/* Pinned Fixed Bottom Input Dock (Always visible, never scrolls off-screen) */}
+            <div className="flex-shrink-0 p-2 sm:p-2.5 border-t border-slate-200/90 dark:border-white/[0.08] bg-[#f1f5f9] dark:bg-[#0b1120] flex items-center gap-1.5 sm:gap-2 shadow-xs transition-colors">
               <span className="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 rounded-md sm:rounded-lg bg-indigo-50 dark:bg-cyan-950/40 text-indigo-700 dark:text-cyan-400 border border-indigo-200 dark:border-cyan-800/40 text-[10px] sm:text-[11px] font-bold font-mono shrink-0 select-none">
                 <span>➜</span>
                 <span>{isRunning ? "scanf >" : "stdin >"}</span>
@@ -562,8 +564,6 @@ export function UnifiedTerminal({
                 </button>
               </div>
             </div>
-
-            <div ref={terminalEndRef} />
           </div>
         )}
 

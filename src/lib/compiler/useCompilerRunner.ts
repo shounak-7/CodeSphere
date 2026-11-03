@@ -395,8 +395,12 @@ export function useCompilerRunner(): CompilerRunnerState {
       };
 
       eventSource.onerror = () => {
-        eventSource.close();
-        eventSourceRef.current = null;
+        // Only close if stream is permanently closed by the server (readyState === 2: CLOSED)
+        // If readyState is 0 (CONNECTING), browser is auto-reconnecting so do not kill it
+        if (eventSource.readyState === EventSource.CLOSED) {
+          eventSource.close();
+          eventSourceRef.current = null;
+        }
       };
 
       // If user had preset fallback input (e.g. from STDIN drawer), feed it into the process
