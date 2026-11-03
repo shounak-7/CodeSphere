@@ -101,10 +101,9 @@ export async function createSession({ code, userId = 'anonymous', secret }) {
   const startTime = Date.now();
   let totalOutputBytes = 0;
 
-  // Use sandbox-runner if compiled in Docker, otherwise spawn binary directly with clean env
-  const useSandboxRunner = existsSync(SANDBOX_RUNNER_PATH);
-  const command = useSandboxRunner ? SANDBOX_RUNNER_PATH : binaryPath;
-  const args = useSandboxRunner ? [binaryPath] : [];
+  // Execute binary directly with sanitized environment & isolated process group
+  const command = binaryPath;
+  const args = [];
 
   const child = spawn(command, args, {
     cwd: workDir,

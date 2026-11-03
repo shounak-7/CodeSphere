@@ -17,14 +17,7 @@ WORKDIR /app
 COPY package.json ./
 COPY src ./src
 
-# Compile the setuid Sandbox Runner wrapper
-# This enables the server to drop privileges to sandboxuser (1002), enforce rlimits (nproc=16, memory=256MB),
-# and completely strip all Node.js environment variables.
-RUN gcc -O2 src/sandbox-runner.c -o /app/sandbox-runner && \
-    chown root:servicegroup /app/sandbox-runner && \
-    chmod 4750 /app/sandbox-runner
-
-# Lock down /app permissions: readable/executable by serviceuser, inaccessible to sandboxuser
+# Lock down /app permissions: readable/executable by serviceuser
 RUN chown -R serviceuser:servicegroup /app && \
     chmod 750 /app && \
     chmod -R 750 /app/src
