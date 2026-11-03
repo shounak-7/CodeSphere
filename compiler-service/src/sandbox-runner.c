@@ -40,14 +40,16 @@ int main(int argc, char *argv[]) {
     // 2. Isolate process group (prevents signals from crossing to parent Node server)
     setsid();
 
-    // 3. Drop all privileges to unprivileged sandboxuser (UID 1002)
-    if (setgid(SANDBOX_GID) != 0) {
-        perror("sandbox-runner: setgid failed");
-        return 1;
-    }
-    if (setuid(SANDBOX_UID) != 0) {
-        perror("sandbox-runner: setuid failed");
-        return 1;
+    // 3. Drop privileges to unprivileged sandboxuser (UID 1002) only if running as root
+    if (geteuid() == 0) {
+        if (setgid(SANDBOX_GID) != 0) {
+            perror("sandbox-runner: setgid failed");
+            return 1;
+        }
+        if (setuid(SANDBOX_UID) != 0) {
+            perror("sandbox-runner: setuid failed");
+            return 1;
+        }
     }
 
     // 4. Strict Sanitized Environment (ZERO leakage of Node.js secrets or keys)
