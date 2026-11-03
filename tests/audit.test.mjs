@@ -98,10 +98,75 @@ async function testNotificationsContract() {
   console.log();
 }
 
+async function testInteractiveStepByStep() {
+  console.log("7. Testing Live Step-by-Step Interactive Execution (Output -> Input -> Next Output)...");
+  const code = `
+#include <stdio.h>
+int main() {
+    int val;
+    printf("Enter number: ");
+    if (scanf("%d", &val) == 1) {
+        printf("Double is: %d\\n", val * 2);
+    }
+    return 0;
+}
+`;
+  const res = await fetch(`${BASE_URL}/api/compiler/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code })
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.success, true);
+  assert.ok(data.sessionId);
+  assert.ok(data.streamUrl);
+  assert.ok(data.inputUrl);
+
+  const streamRes = await fetch(data.streamUrl);
+  const reader = streamRes.body.getReader();
+  const decoder = new TextDecoder();
+
+  let receivedPrompt = false;
+  let receivedResult = false;
+  let receivedExit = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = decoder.decode(value);
+
+    if (chunk.includes("Enter number:") && !receivedPrompt) {
+      receivedPrompt = true;
+      const inRes = await fetch(data.inputUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-session-token": data.token
+        },
+        body: JSON.stringify({ input: "35" })
+      });
+      assert.equal(inRes.status, 200);
+    }
+    if (chunk.includes("Double is: 70")) {
+      receivedResult = true;
+    }
+    if (chunk.includes('"type":"exit"') && chunk.includes('"code":0')) {
+      receivedExit = true;
+    }
+  }
+
+  assert.ok(receivedPrompt, "Must have streamed prompt first before input");
+  assert.ok(receivedResult, "Must have processed input and streamed double value");
+  assert.ok(receivedExit, "Must have exited cleanly with code 0");
+  console.log("   ✓ Live step-by-step interactive execution verified end-to-end on production!\n");
+}
+
 async function runAll() {
   try {
     await testCompilerStandardC11();
     await testCompilerTimeout();
+    await testInteractiveStepByStep();
     await testPostsApi();
     await testTagsApi();
     await testBookmarksContract();
