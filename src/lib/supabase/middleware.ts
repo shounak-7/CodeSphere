@@ -24,6 +24,18 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(callbackUrl);
   }
 
+  // Check if route actually needs an auth check
+  const pathname = request.nextUrl.pathname;
+  const protectedPaths = ["/workspace", "/messages", "/settings", "/bookmarks"];
+  const isMyProfile = pathname === "/profile/me" || pathname.startsWith("/profile/me/");
+  const isProtectedPath = protectedPaths.some((path) => pathname.startsWith(path)) || isMyProfile;
+  const isLoginPath = pathname === "/login";
+
+  // Fast path: for public paths and API routes, do not block middleware on remote Supabase auth calls
+  if (!isProtectedPath && !isLoginPath) {
+    return supabaseResponse;
+  }
+
   try {
     const supabase = createServerClient(supabaseUrl, supabaseKey, {
       cookies: {
@@ -44,29 +56,20 @@ export async function updateSession(request: NextRequest) {
       },
     });
 
-    // Refresh auth session
+    // Refresh auth session only on protected paths and login
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
-    // Protected paths that require authentication
-    const protectedPaths = ["/workspace", "/messages", "/settings", "/bookmarks"];
-    const isMyProfile =
-      request.nextUrl.pathname === "/profile/me" ||
-      request.nextUrl.pathname.startsWith("/profile/me/");
-    const isProtectedPath =
-      protectedPaths.some((path) => request.nextUrl.pathname.startsWith(path)) ||
-      isMyProfile;
-
     if (isProtectedPath && !user) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
-      url.searchParams.set("redirectTo", request.nextUrl.pathname);
+      url.searchParams.set("redirectTo", pathname);
       return NextResponse.redirect(url);
     }
 
     // Redirect logged in user from /login to /workspace
-    if (request.nextUrl.pathname === "/login" && user) {
+    if (isLoginPath && user) {
       const url = request.nextUrl.clone();
       url.pathname = "/workspace";
       return NextResponse.redirect(url);

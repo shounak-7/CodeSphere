@@ -18,9 +18,7 @@ async function resolveCurrentUser() {
     return { user: null, userId: null, username: null };
   }
 
-  const profile = await getLocalProfile(user.id);
   const username =
-    profile?.username ||
     (user.user_metadata?.user_name as string) ||
     (user.user_metadata?.username as string) ||
     user.email?.split("@")[0] ||
@@ -48,15 +46,14 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(50);
 
-    if (!error && notifications && notifications.length > 0) {
+    if (!error && notifications) {
       return NextResponse.json({ notifications });
     }
   } catch (err) {
     console.warn("Supabase notifications fetch error:", err);
   }
 
-  const localNotifications = await getLocalNotifications(userId, username || undefined);
-  return NextResponse.json({ notifications: localNotifications });
+  return NextResponse.json({ notifications: [] });
 }
 
 export async function PUT() {
