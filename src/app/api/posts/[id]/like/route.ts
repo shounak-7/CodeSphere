@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { toggleLocalLike } from "@/lib/storage/communityStore";
 
 export async function POST(
@@ -86,12 +87,12 @@ export async function POST(
           .single();
 
         if (currentPost && currentPost.author_id !== user.id) {
-          await supabase.from("notifications").insert({
+          const admin = createAdminClient();
+          await admin.from("notifications").insert({
             recipient_id: currentPost.author_id,
             actor_id: user.id,
             notification_type: "like",
             reference_id: postId,
-            content: "liked your post",
             is_read: false,
           });
         }

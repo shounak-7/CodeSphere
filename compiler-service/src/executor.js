@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const MAX_OUTPUT_BYTES = 512 * 1024; // 512KB output cap to prevent infinite printf flooding
-const DEFAULT_TIMEOUT_MS = 4000;      // 4 seconds
-const MAX_TIMEOUT_MS = 8000;          // 8 seconds maximum
+const DEFAULT_TIMEOUT_MS = 30000;     // 30 seconds (no short artificial 4s limit)
+const MAX_TIMEOUT_MS = 60000;         // 60 seconds maximum
 
 /**
  * Compiles and runs a C program securely with timeouts, stdin, and resource limits.

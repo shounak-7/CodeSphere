@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalComments, addLocalComment } from "@/lib/storage/communityStore";
 
 const CreateCommentSchema = z.object({
@@ -130,12 +131,12 @@ export async function POST(
 
               // Notify author if not commenting on own post
               if (currentPost.author_id !== user.id) {
-                await supabase.from("notifications").insert({
+                const admin = createAdminClient();
+                await admin.from("notifications").insert({
                   recipient_id: currentPost.author_id,
                   actor_id: user.id,
                   notification_type: "comment",
                   reference_id: postId,
-                  content: content.slice(0, 100),
                   is_read: false,
                 });
               }

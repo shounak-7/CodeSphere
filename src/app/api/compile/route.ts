@@ -5,7 +5,7 @@ import { executeCProgram } from "@/../compiler-service/src/executor.js";
 const CompileRequestSchema = z.object({
   code: z.string().min(1, "Source code cannot be empty").max(256 * 1024, "Code exceeds 256KB limit"),
   stdin: z.string().max(64 * 1024, "Standard input exceeds 64KB limit").optional().default(""),
-  timeoutMs: z.number().min(1000).max(8000).optional().default(4000),
+  timeoutMs: z.number().min(1000).max(60000).optional().default(30000),
 });
 
 export async function POST(request: Request) {
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
             "x-compiler-secret": compilerSecret || "",
           },
           body: JSON.stringify({ code, stdin, timeoutMs }),
-          signal: AbortSignal.timeout(timeoutMs + 4000),
+          signal: AbortSignal.timeout(timeoutMs + 10000),
         });
 
         if (remoteResponse.ok) {

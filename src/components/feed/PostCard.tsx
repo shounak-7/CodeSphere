@@ -160,10 +160,6 @@ export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }
   };
 
   const handleToggleLike = async () => {
-    if (!currentUserId) {
-      useToastStore.getState().addToast("Please sign in to like posts.", "warning");
-      return;
-    }
     const nextLiked = !liked;
     const optimisticCount = nextLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
     setLiked(nextLiked);
@@ -172,6 +168,12 @@ export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }
     try {
       const res = await fetch(`/api/posts/${post.id}/like`, { method: "POST" });
       const data = await res.json();
+      if (res.status === 401) {
+        setLiked(!nextLiked);
+        setLikesCount(likesCount);
+        useToastStore.getState().addToast("Please sign in to like posts.", "warning");
+        return;
+      }
       if (!res.ok) {
         setLiked(!nextLiked);
         setLikesCount(likesCount);
@@ -189,10 +191,6 @@ export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }
   };
 
   const handleToggleBookmark = async () => {
-    if (!currentUserId) {
-      useToastStore.getState().addToast("Please sign in to bookmark posts.", "warning");
-      return;
-    }
     const nextVal = !bookmarked;
     setBookmarked(nextVal);
     try {
@@ -202,6 +200,11 @@ export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }
         body: JSON.stringify({ target_type: "post", target_id: post.id }),
       });
       const data = await res.json();
+      if (res.status === 401) {
+        setBookmarked(!nextVal);
+        useToastStore.getState().addToast("Please sign in to bookmark posts.", "warning");
+        return;
+      }
       if (res.ok) {
         setBookmarked(data.bookmarked);
         useToastStore.getState().addToast(
@@ -238,10 +241,6 @@ export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }
 
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUserId) {
-      useToastStore.getState().addToast("Please sign in to comment on posts.", "warning");
-      return;
-    }
     if (!commentInput.trim()) return;
 
     setSubmittingComment(true);
@@ -252,6 +251,10 @@ export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }
         body: JSON.stringify({ content: commentInput.trim() }),
       });
       const data = await res.json();
+      if (res.status === 401) {
+        useToastStore.getState().addToast("Please sign in to comment on posts.", "warning");
+        return;
+      }
       if (res.ok && data.comment) {
         setComments((prev) => [...prev, data.comment]);
         setCommentsCount((prev) => prev + 1);

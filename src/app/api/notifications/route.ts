@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  getLocalNotifications,
   markAllLocalNotificationsRead,
   deleteLocalNotification,
   clearLocalNotifications,
-  getLocalProfile,
 } from "@/lib/storage/communityStore";
 
 async function resolveCurrentUser() {
@@ -64,8 +63,8 @@ export async function PUT() {
   }
 
   try {
-    const supabase = await createClient();
-    await supabase
+    const admin = createAdminClient();
+    await admin
       .from("notifications")
       .update({ is_read: true })
       .eq("recipient_id", userId)
@@ -74,7 +73,9 @@ export async function PUT() {
     console.warn("Supabase mark notifications read error:", err);
   }
 
-  await markAllLocalNotificationsRead(userId, username || undefined);
+  try {
+    await markAllLocalNotificationsRead(userId, username || undefined);
+  } catch {}
   return NextResponse.json({ success: true });
 }
 
@@ -89,26 +90,25 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = await createClient();
-
-  if (all) {
-    try {
-      await supabase.from("notifications").delete().eq("recipient_id", userId);
-    } catch (err) {
-      console.warn("Supabase clear notifications error:", err);
+  try {
+    const admin = createAdminClient();
+    if (all) {
+      await admin.from("notifications").delete().eq("recipient_id", userId);
+      try {
+        await clearLocalNotifications(userId, username || undefined);
+      } catch {}
+      return NextResponse.json({ success: true, cleared: true });
     }
-    await clearLocalNotifications(userId, username || undefined);
-    return NextResponse.json({ success: true, cleared: true });
-  }
 
-  if (id) {
-    try {
-      await supabase.from("notifications").delete().eq("id", id);
-    } catch (err) {
-      console.warn("Supabase delete notification error:", err);
+    if (id) {
+      await admin.from("notifications").delete().eq("id", id).eq("recipient_id", userId);
+      try {
+        await deleteLocalNotification(id, userId, username || undefined);
+      } catch {}
+      return NextResponse.json({ success: true, deletedId: id });
     }
-    await deleteLocalNotification(id, userId, username || undefined);
-    return NextResponse.json({ success: true, deletedId: id });
+  } catch (err) {
+    console.warn("Supabase delete notification error:", err);
   }
 
   return NextResponse.json({ error: "Missing notification id or all flag" }, { status: 400 });
