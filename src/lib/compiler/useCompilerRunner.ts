@@ -283,6 +283,59 @@ export function useCompilerRunner(): CompilerRunnerState {
       const eventSource = new EventSource(streamUrl);
       eventSourceRef.current = eventSource;
 
+      const runDirectCompile = async () => {
+        try {
+          const res = await fetch("/api/compile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code, stdin: fallbackStdin }),
+          });
+          const compData = await res.json();
+          const duration = compData.durationMs ?? (Date.now() - startTime);
+          setDurationMs(duration);
+          setIsRunning(false);
+
+          if (compData.success) {
+            setStdout(compData.stdout || "");
+            setStderr(compData.stderr || "");
+            setExitCode(0);
+            setStatus("success");
+            setTerminalEntries([
+              ...(compData.stdout
+                ? [{ id: Math.random().toString(36).substring(2, 9), type: "stdout" as const, text: compData.stdout }]
+                : []),
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                type: "exit" as const,
+                text: `[Process completed with exit code 0]`,
+                code: 0,
+                durationMs: duration,
+              },
+            ]);
+          } else {
+            const errText = compData.error || compData.stderr || "Execution failed";
+            setStderr(errText);
+            setExitCode(compData.exitCode ?? 1);
+            setStatus("error");
+            setProblems(parseCompilerDiagnostics(errText));
+            setTerminalEntries([
+              { id: Math.random().toString(36).substring(2, 9), type: "stderr" as const, text: errText },
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                type: "exit" as const,
+                text: `[Process exited with error code ${compData.exitCode ?? 1}]`,
+                code: compData.exitCode ?? 1,
+                durationMs: duration,
+              },
+            ]);
+          }
+        } catch {
+          setIsRunning(false);
+          setStatus("error");
+          setExitCode(1);
+        }
+      };
+
       eventSource.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
@@ -297,6 +350,12 @@ export function useCompilerRunner(): CompilerRunnerState {
               },
             ]);
           } else if (payload.type === "stderr" && payload.data) {
+            if (payload.data.includes("sandbox-runner: setgid failed")) {
+              eventSource.close();
+              eventSourceRef.current = null;
+              runDirectCompile();
+              return;
+            }
             setStderr((prev) => prev + payload.data);
             setProblems((prev) => [...prev, ...parseCompilerDiagnostics(payload.data)]);
             setTerminalEntries((prev) => [

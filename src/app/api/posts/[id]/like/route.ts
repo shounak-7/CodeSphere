@@ -36,14 +36,30 @@ export async function POST(
       "",
   };
 
-  // Always update persistent local store with actor meta
-  const { liked, count } = await toggleLocalLike(postId, userId, userMeta);
-  let finalLiked = liked;
-  let finalCount = count;
-
-  // Sync to Supabase if logged in
+  // Try Supabase first if authenticated
   if (user) {
     try {
+      // Ensure user profile exists
+      const { data: existingProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!existingProfile) {
+        const emailPrefix = user.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "") || "coder";
+        const username = user.user_metadata?.username || `${emailPrefix}_${user.id.substring(0, 5)}`;
+        const fullName = user.user_metadata?.full_name || user.user_metadata?.name || emailPrefix;
+        const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture || "";
+
+        await supabase.from("profiles").upsert({
+          id: user.id,
+          username,
+          full_name: fullName,
+          avatar_url: avatarUrl,
+        });
+      }
+
       const { data: existingLike } = await supabase
         .from("post_likes")
         .select("id")
@@ -51,13 +67,34 @@ export async function POST(
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (existingLike && !liked) {
+      let liked = false;
+      if (existingLike) {
         await supabase.from("post_likes").delete().eq("id", existingLike.id);
-      } else if (!existingLike && liked) {
+        liked = false;
+      } else {
         await supabase.from("post_likes").insert({
           post_id: postId,
           user_id: user.id,
         });
+        liked = true;
+
+        // Notify post author if liked by someone else
+        const { data: currentPost } = await supabase
+          .from("posts")
+          .select("author_id")
+          .eq("id", postId)
+          .single();
+
+        if (currentPost && currentPost.author_id !== user.id) {
+          await supabase.from("notifications").insert({
+            recipient_id: currentPost.author_id,
+            actor_id: user.id,
+            notification_type: "like",
+            reference_id: postId,
+            content: "liked your post",
+            is_read: false,
+          });
+        }
       }
 
       // Query exact live like count from Supabase
@@ -66,13 +103,21 @@ export async function POST(
         .select("id", { count: "exact" })
         .eq("post_id", postId);
 
-      if (supaLikesCount !== null && supaLikesCount !== undefined && supaLikesCount > 0) {
-        finalCount = supaLikesCount;
-      }
+      const count = supaLikesCount ?? (liked ? 1 : 0);
+
+      // Keep post.likes_count column updated in DB
+      await supabase
+        .from("posts")
+        .update({ likes_count: count })
+        .eq("id", postId);
+
+      return NextResponse.json({ liked, count });
     } catch (err) {
-      console.warn("Supabase like sync error:", err);
+      console.warn("Supabase like error:", err);
     }
   }
 
-  return NextResponse.json({ liked: finalLiked, count: finalCount });
+  // Fallback to local store
+  const { liked, count } = await toggleLocalLike(postId, userId, userMeta);
+  return NextResponse.json({ liked, count });
 }
