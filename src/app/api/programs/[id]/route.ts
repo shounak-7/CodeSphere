@@ -59,27 +59,51 @@ export async function PUT(
   try {
     const json = await request.json();
     const parsed = UpdateProgramSchema.parse(json);
+    const { create_version, change_description, ...updateFields } = parsed;
 
-    // Try Supabase update
-    try {
-      const { data: updated, error } = await supabase
-        .from("programs")
-        .update({
-          ...parsed,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-        .select()
-        .single();
+    // Try Supabase update if authenticated
+    if (currentUser) {
+      try {
+        const { data: updated, error } = await supabase
+          .from("programs")
+          .update({
+            ...updateFields,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id)
+          .eq("owner_id", currentUser.id)
+          .select()
+          .single();
 
-      if (!error && updated) {
-        return NextResponse.json({ program: updated });
+        if (error) {
+          console.error("Supabase update program error:", error);
+        } else if (updated) {
+          if (create_version) {
+            try {
+              const { count } = await supabase
+                .from("program_versions")
+                .select("*", { count: "exact", head: true })
+                .eq("program_id", id);
+
+              await supabase.from("program_versions").insert({
+                program_id: id,
+                owner_id: currentUser.id,
+                version_number: (count || 0) + 1,
+                source_code: updated.source_code,
+                change_description: change_description || "Checkpoint version",
+              });
+            } catch (vErr) {
+              console.error("Version creation warning:", vErr);
+            }
+          }
+          return NextResponse.json({ program: updated });
+        }
+      } catch (dbErr) {
+        console.error("Supabase program update exception:", dbErr);
       }
-    } catch {
-      // Fallback to local store
     }
 
-    // Local store update
+    // Local store update fallback
     const updatedLocal = await saveLocalProgram({
       id,
       ...(currentUser?.id ? { owner_id: currentUser.id } : {}),

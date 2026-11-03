@@ -77,6 +77,27 @@ export async function POST(request: Request) {
     // Try Supabase first if authenticated
     if (user) {
       try {
+        // Ensure user profile exists to satisfy foreign key constraint
+        const { data: existingProfile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!existingProfile) {
+          const emailPrefix = user.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "") || "coder";
+          const username = user.user_metadata?.username || `${emailPrefix}_${user.id.substring(0, 5)}`;
+          const fullName = user.user_metadata?.full_name || user.user_metadata?.name || emailPrefix;
+          const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture || "";
+
+          await supabase.from("profiles").upsert({
+            id: user.id,
+            username,
+            full_name: fullName,
+            avatar_url: avatarUrl,
+          });
+        }
+
         const { data: program, error } = await supabase
           .from("programs")
           .insert({
@@ -94,20 +115,24 @@ export async function POST(request: Request) {
           .select()
           .single();
 
-        if (!error && program) {
+        if (error) {
+          console.error("Supabase insert program error:", error);
+        } else if (program) {
           // Checkpoint
-          await supabase.from("program_versions").insert({
-            program_id: program.id,
-            owner_id: user.id,
-            version_number: 1,
-            source_code: program.source_code,
-            change_description: "Initial program creation",
-          });
+          try {
+            await supabase.from("program_versions").insert({
+              program_id: program.id,
+              owner_id: user.id,
+              version_number: 1,
+              source_code: program.source_code,
+              change_description: "Initial program creation",
+            });
+          } catch {}
 
           return NextResponse.json({ program }, { status: 201 });
         }
-      } catch {
-        // Fallback to local store
+      } catch (dbErr) {
+        console.error("Supabase create program exception:", dbErr);
       }
     }
 

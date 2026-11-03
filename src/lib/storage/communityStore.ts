@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { getLocalPrograms } from "./workspaceStore";
 
@@ -149,7 +150,9 @@ interface CommunityDB {
   verified_usernames?: string[];
 }
 
-const DATA_DIR = join(process.cwd(), ".data");
+const DATA_DIR = process.env.VERCEL || process.env.NODE_ENV === "production"
+  ? join(tmpdir(), "codesphere-data")
+  : join(process.cwd(), ".data");
 const DATA_FILE = join(DATA_DIR, "community.json");
 
 const TEAM_PROFILE: StoredProfile = {
