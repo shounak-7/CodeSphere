@@ -444,12 +444,13 @@ export function UnifiedTerminal({
                   }
                   if (entry.type === "input") {
                     return (
-                      <div key={entry.id} className="text-indigo-700 dark:text-cyan-300 font-bold flex items-center gap-1.5 my-1">
-                        <span className="text-emerald-600 dark:text-emerald-400 font-mono text-[11px]">➜ input:</span>
-                        <span className="bg-indigo-100/70 dark:bg-cyan-950/40 text-indigo-950 dark:text-cyan-200 px-2 py-0.5 rounded-lg border border-indigo-200 dark:border-cyan-800/40 font-mono">
-                          {entry.text}
-                        </span>
-                      </div>
+                      <span
+                        key={entry.id}
+                        className="inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-cyan-950/60 text-indigo-900 dark:text-cyan-200 font-bold border border-indigo-300 dark:border-cyan-700/60 font-mono text-[11px]"
+                      >
+                        <span className="text-emerald-500 font-bold">➜</span>
+                        <span>{entry.text}</span>
+                      </span>
                     );
                   }
                   if (entry.type === "stderr") {
