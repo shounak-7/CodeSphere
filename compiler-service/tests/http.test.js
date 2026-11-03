@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 
 const COMPILER_URL = 'http://localhost:4000';
-const SECRET = 'codesphere-sandbox-compiler-secret-key-2026';
+const SECRET = 'cs_sec_26a3c606d98b18517f988f5f5d3e0161e77e4e556109d369d393e7d3173c3e8d';
 
 function request(method, path, body = null, headers = {}) {
   return new Promise((resolve, reject) => {
