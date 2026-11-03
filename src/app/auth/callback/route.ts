@@ -7,6 +7,15 @@ export async function GET(request: Request) {
   const rawNext = searchParams.get("next");
   const next = rawNext && rawNext !== "/workspace" ? rawNext : "/feed";
 
+  // Properly determine target base URL across local dev & Vercel edge/proxies
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const isLocalEnv = process.env.NODE_ENV === "development";
+  const redirectBase = isLocalEnv
+    ? origin
+    : forwardedHost
+    ? `https://${forwardedHost}`
+    : origin;
+
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -38,10 +47,10 @@ export async function GET(request: Request) {
         }
       }
 
-      return NextResponse.redirect(`${origin}${next}`);
+      return NextResponse.redirect(`${redirectBase}${next}`);
     }
   }
 
   // Return the user to an error page with instructions
-  return NextResponse.redirect(`${origin}/login?error=auth_callback_failed`);
+  return NextResponse.redirect(`${redirectBase}/login?error=auth_callback_failed`);
 }
