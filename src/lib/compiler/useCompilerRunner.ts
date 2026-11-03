@@ -285,6 +285,9 @@ export function useCompilerRunner(): CompilerRunnerState {
 
       const runDirectCompile = async () => {
         try {
+          setStderr("");
+          setProblems([]);
+          setTerminalEntries([]);
           const res = await fetch("/api/compile", {
             method: "POST",
             headers: { "Content-Type": "application/json" },

@@ -628,7 +628,7 @@ export function UnifiedTerminal({
               </div>
             ) : stderr ? (
               /* Raw stderr fallback */
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="text-xs text-red-600 dark:text-red-400 font-bold flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4" />
                   <span>Compiler Diagnostic Output:</span>
@@ -636,6 +636,23 @@ export function UnifiedTerminal({
                 <pre className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-red-50 border border-red-200 dark:bg-red-950/30 dark:border-red-900/40 text-red-800 dark:text-red-200 whitespace-pre-wrap font-mono text-[10px] sm:text-[11px]">
                   {stderr}
                 </pre>
+
+                {/* If timed out waiting for input or infinite loop, provide direct STDIN CTA */}
+                {stderr.includes("waiting for unprovided input") && onBatchStdinChange && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Keyboard className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span>Does this program use <code>scanf()</code> or require user input? Provide testcase inputs in the STDIN tab.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("stdin")}
+                      className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] shrink-0 transition-colors cursor-pointer"
+                    >
+                      Open STDIN Tab
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="py-8 sm:py-12 text-center text-slate-500">

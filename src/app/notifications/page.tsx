@@ -19,6 +19,7 @@ import { UserAvatar } from "@/components/ui/UserAvatar";
 import { useToastStore } from "@/lib/store/useToastStore";
 import { VerifiedBadge, isTeamAccount, isVerifiedAccount } from "@/components/ui/VerifiedBadge";
 import { ScrollableNav } from "@/components/ui/ScrollableNav";
+import { createClient } from "@/lib/supabase/client";
 
 interface NotificationItem {
   id: string;
@@ -67,6 +68,35 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     loadNotifications();
+
+    const supabase = createClient();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        channel = supabase
+          .channel(`notifications-page-${user.id}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "notifications",
+              filter: `recipient_id=eq.${user.id}`,
+            },
+            () => {
+              loadNotifications();
+            }
+          )
+          .subscribe();
+      }
+    });
+
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, []);
 
   const handleMarkAllRead = async () => {

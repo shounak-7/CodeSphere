@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { toggleLocalFollow, getLocalProfile } from "@/lib/storage/communityStore";
 
 export async function POST(
@@ -106,6 +107,21 @@ export async function POST(
         });
         supabaseToggled = true;
         supabaseFollowing = true;
+
+        // Dispatch follow notification to the recipient via admin client
+        if (targetProfileId !== currentUser.id) {
+          try {
+            const adminSupabase = createAdminClient();
+            await adminSupabase.from("notifications").insert({
+              recipient_id: targetProfileId,
+              actor_id: currentUser.id,
+              notification_type: "follow",
+              read: false,
+            });
+          } catch (notifErr) {
+            console.warn("Follow notification dispatch warning:", notifErr);
+          }
+        }
       }
     } catch (err) {
       console.warn("Supabase follow sync warning:", err);

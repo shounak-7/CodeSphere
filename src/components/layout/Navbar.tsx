@@ -100,11 +100,30 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
 
   useEffect(() => {
     const supabase = createClient();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
         setUser(user);
         fetchProfile();
         fetchNotifications();
+
+        // Subscribe to real-time notification events for this user
+        channel = supabase
+          .channel(`user-notifications-${user.id}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "notifications",
+              filter: `recipient_id=eq.${user.id}`,
+            },
+            () => {
+              fetchNotifications();
+            }
+          )
+          .subscribe();
       }
     });
 
@@ -148,8 +167,8 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleKeyDown);
 
-    // Periodic poll every 20s for fresh notifications
-    const interval = setInterval(fetchNotifications, 20000);
+    // Periodic fallback poll (reduced from 20s to 60s since Realtime is active)
+    const interval = setInterval(fetchNotifications, 60000);
 
     return () => {
       window.removeEventListener("profile-updated", handleProfileUpdated);
@@ -157,6 +176,9 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
       clearInterval(interval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
     };
   }, []);
 

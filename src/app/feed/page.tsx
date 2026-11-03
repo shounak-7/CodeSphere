@@ -40,8 +40,8 @@ export default function FeedPage() {
     }
   }, [activeTab, selectedTag]);
 
+  // Fetch user & trending tags once on mount
   useEffect(() => {
-    // 1. Fetch real active developer profile immediately
     fetch("/api/profiles/me")
       .then((res) => res.json())
       .then((data) => {
@@ -51,7 +51,6 @@ export default function FeedPage() {
       })
       .catch(() => {});
 
-    // 2. Fallback to Supabase auth user if available
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
@@ -63,9 +62,13 @@ export default function FeedPage() {
       }
     });
 
-    fetchPosts();
     fetchTrendingTags();
-  }, [fetchPosts, fetchTrendingTags]);
+  }, [fetchTrendingTags]);
+
+  // Fetch posts when tab or tag filter changes
+  useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
 
   const handlePostCreated = () => {
     fetchPosts();
