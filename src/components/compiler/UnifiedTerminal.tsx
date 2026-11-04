@@ -20,8 +20,9 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  Loader2,
 } from "lucide-react";
-import { TerminalEntry, CompilerProblem } from "@/lib/compiler/useCompilerRunner";
+import { TerminalEntry, CompilerProblem, CompilerStatus } from "@/lib/compiler/useCompilerRunner";
 
 interface UnifiedTerminalProps {
   stdout: string;
@@ -29,7 +30,7 @@ interface UnifiedTerminalProps {
   terminalEntries?: TerminalEntry[];
   problems?: CompilerProblem[];
   isRunning: boolean;
-  status: "idle" | "running" | "success" | "error";
+  status: CompilerStatus;
   exitCode?: number | null;
   durationMs: number | null;
   height?: number | string;
@@ -90,10 +91,78 @@ export function UnifiedTerminal({
 
   // Switch to Problems tab automatically if compilation error occurs
   useEffect(() => {
-    if (status === "error" && problems.length > 0) {
+    if ((status === "error" || status === "compilation_error") && problems.length > 0) {
       setActiveTab("problems");
     }
   }, [status, problems.length]);
+
+  const renderStatusBadge = () => {
+    if (status === "compiling") {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30 animate-pulse">
+          <Loader2 className="w-3 h-3 animate-spin text-sky-500" />
+          <span>Compiling GCC...</span>
+        </span>
+      );
+    }
+    if (status === "waiting_input") {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 animate-pulse">
+          <Keyboard className="w-3 h-3 text-emerald-500" />
+          <span>Waiting for input...</span>
+        </span>
+      );
+    }
+    if (status === "running" || isRunning) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 animate-pulse">
+          <Play className="w-3 h-3 text-amber-500 fill-amber-500" />
+          <span>Running program...</span>
+        </span>
+      );
+    }
+    if (status === "completed" || status === "success") {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+          <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+          <span>Completed (code 0) in {durationMs ?? 0}ms</span>
+        </span>
+      );
+    }
+    if (status === "compilation_error") {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30">
+          <AlertTriangle className="w-3 h-3 text-red-600 dark:text-red-400" />
+          <span>Compilation failed</span>
+        </span>
+      );
+    }
+    if (status === "timed_out") {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-orange-500/15 text-orange-700 dark:text-orange-400 border border-orange-500/30">
+          <Clock className="w-3 h-3 text-orange-600 dark:text-orange-400" />
+          <span>Timed out</span>
+        </span>
+      );
+    }
+    if (status === "terminated") {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-500/15 text-slate-700 dark:text-slate-400 border border-slate-500/30">
+          <Square className="w-3 h-3 text-slate-600 dark:text-slate-400" />
+          <span>Terminated</span>
+        </span>
+      );
+    }
+    if (status === "runtime_error" || status === "error") {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30">
+          <XCircle className="w-3 h-3 text-red-600 dark:text-red-400" />
+          <span>Runtime error {exitCode !== null ? `(code ${exitCode})` : ""}</span>
+        </span>
+      );
+    }
+    return <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">GCC 11 (C11) Ready</span>;
+  };
 
   // Drag resizer handler
   const handleMouseDownResize = (e: React.MouseEvent) => {
@@ -174,21 +243,7 @@ export function UnifiedTerminal({
           </button>
 
           {/* Quick status pill */}
-          {isRunning ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 animate-pulse">
-              <Clock className="w-3 h-3" /> Running GCC...
-            </span>
-          ) : status === "success" ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
-              <CheckCircle2 className="w-3 h-3" /> Exited {exitCode ?? 0} ({durationMs ?? 0}ms)
-            </span>
-          ) : status === "error" ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30">
-              <XCircle className="w-3 h-3" /> Error ({problems.length} issues)
-            </span>
-          ) : (
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">GCC 11 Ready</span>
-          )}
+          {renderStatusBadge()}
         </div>
 
         <div className="flex items-center gap-2">
@@ -319,24 +374,7 @@ export function UnifiedTerminal({
 
         {/* Center: Execution Status */}
         <div className="hidden md:flex items-center gap-2">
-          {isRunning ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 animate-pulse">
-              <Clock className="w-3 h-3" />
-              <span>Program running (interactive STDIN active)...</span>
-            </span>
-          ) : status === "success" ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
-              <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-              <span>Exited 0 in {durationMs ?? 0}ms</span>
-            </span>
-          ) : status === "error" ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-red-500/15 text-red-700 dark:text-red-400 border border-red-500/30">
-              <XCircle className="w-3 h-3 text-red-600 dark:text-red-400" />
-              <span>Process failed {exitCode !== null ? `(code ${exitCode})` : ""}</span>
-            </span>
-          ) : (
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">GCC 11 (C11) Ready</span>
-          )}
+          {renderStatusBadge()}
         </div>
 
         {/* Right Action Controls */}
@@ -504,10 +542,17 @@ export function UnifiedTerminal({
 
               {/* Real-time VS Code-style inline typing prompt & cursor when running */}
               {isRunning && (
-                <span className="inline-flex items-center text-emerald-600 dark:text-cyan-300 font-bold font-mono">
-                  <span>{currentLine}</span>
-                  <span className="w-2 h-3.5 sm:h-4 bg-emerald-500 dark:bg-cyan-400 animate-pulse ml-0.5 inline-block align-middle" />
-                </span>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="inline-flex items-center text-emerald-600 dark:text-cyan-300 font-bold font-mono">
+                    <span>{currentLine}</span>
+                    <span className="w-2 h-3.5 sm:h-4 bg-emerald-500 dark:bg-cyan-400 animate-pulse ml-0.5 inline-block align-middle" />
+                  </span>
+                  {status === "waiting_input" && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400/80 font-sans italic flex items-center gap-1 animate-pulse select-none">
+                      <Keyboard className="w-3 h-3" /> Waiting for input... (type & press Enter)
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
@@ -645,23 +690,6 @@ export function UnifiedTerminal({
                 <pre className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-red-50 border border-red-200 dark:bg-red-950/30 dark:border-red-900/40 text-red-800 dark:text-red-200 whitespace-pre-wrap font-mono text-[10px] sm:text-[11px]">
                   {stderr}
                 </pre>
-
-                {/* If timed out waiting for input or infinite loop, provide direct STDIN CTA */}
-                {stderr.includes("waiting for unprovided input") && onBatchStdinChange && (
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Keyboard className="w-4 h-4 text-amber-500 shrink-0" />
-                      <span>Does this program use <code>scanf()</code> or require user input? Provide testcase inputs in the STDIN tab.</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("stdin")}
-                      className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] shrink-0 transition-colors cursor-pointer"
-                    >
-                      Open STDIN Tab
-                    </button>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="py-8 sm:py-12 text-center text-slate-500">

@@ -62,13 +62,26 @@ export function parseCompilerDiagnostics(rawStderr: string): CompilerProblem[] {
   return problems;
 }
 
+export type CompilerStatus =
+  | "idle"
+  | "compiling"
+  | "running"
+  | "waiting_input"
+  | "completed"
+  | "compilation_error"
+  | "runtime_error"
+  | "timed_out"
+  | "terminated"
+  | "success"
+  | "error";
+
 export interface CompilerRunnerState {
   stdout: string;
   stderr: string;
   terminalEntries: TerminalEntry[];
   problems: CompilerProblem[];
   isRunning: boolean;
-  status: "idle" | "running" | "success" | "error";
+  status: CompilerStatus;
   exitCode: number | null;
   durationMs: number | null;
   activeSessionId: string | null;
@@ -85,7 +98,7 @@ export function useCompilerRunner(): CompilerRunnerState {
   const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([]);
   const [problems, setProblems] = useState<CompilerProblem[]>([]);
   const [isRunning, setIsRunning] = useState(false);
-  const [status, setStatus] = useState<"idle" | "running" | "success" | "error">("idle");
+  const [status, setStatus] = useState<CompilerStatus>("idle");
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [durationMs, setDurationMs] = useState<number | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -97,8 +110,13 @@ export function useCompilerRunner(): CompilerRunnerState {
   const wsRef = useRef<WebSocket | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const waitingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const clearTerminal = useCallback(() => {
+    if (waitingTimerRef.current) {
+      clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    }
     setStdout("");
     setStderr("");
     setTerminalEntries([]);
@@ -112,6 +130,11 @@ export function useCompilerRunner(): CompilerRunnerState {
     const sid = activeSessionRef.current;
     const killUrl = killUrlRef.current || (sid ? `/api/compiler/session/${sid}/kill` : null);
     const token = activeTokenRef.current;
+
+    if (waitingTimerRef.current) {
+      clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    }
 
     // Send kill via WebSocket if open
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -148,7 +171,7 @@ export function useCompilerRunner(): CompilerRunnerState {
     killUrlRef.current = null;
     setActiveSessionId(null);
     setIsRunning(false);
-    setStatus("idle");
+    setStatus("terminated");
     setTerminalEntries((prev) => [
       ...prev,
       {
@@ -164,6 +187,12 @@ export function useCompilerRunner(): CompilerRunnerState {
     const inputUrl = inputUrlRef.current || (sid ? `/api/compiler/session/${sid}/input` : null);
     const token = activeTokenRef.current;
     if (!sid && !inputUrl && !wsRef.current) return false;
+
+    if (waitingTimerRef.current) {
+      clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    }
+    setStatus("running");
 
     // Record user input line in terminal stream
     setTerminalEntries((prev) => [
@@ -246,8 +275,13 @@ export function useCompilerRunner(): CompilerRunnerState {
       await killSession();
     }
 
+    if (waitingTimerRef.current) {
+      clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    }
+
     setIsRunning(true);
-    setStatus("running");
+    setStatus("compiling");
     setStdout("");
     setStderr("");
     setTerminalEntries([]);
@@ -283,7 +317,7 @@ export function useCompilerRunner(): CompilerRunnerState {
 
       if (!startRes.ok || !startData.success || !startData.sessionId) {
         setIsRunning(false);
-        setStatus("error");
+        setStatus("compilation_error");
         setExitCode(1);
         const errText = startData.error || "Compilation failed";
         setStderr(errText);
@@ -305,6 +339,7 @@ export function useCompilerRunner(): CompilerRunnerState {
       inputUrlRef.current = startData.inputUrl || null;
       killUrlRef.current = startData.killUrl || null;
       setActiveSessionId(sessionId);
+      setStatus("running");
 
       // If we showed the cold-start message, clear it now that the container responded
       if (isSlow) {
@@ -327,6 +362,13 @@ export function useCompilerRunner(): CompilerRunnerState {
               text: payload.data,
             },
           ]);
+          // When program emits output and stays alive, it is awaiting next user input
+          if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
+          waitingTimerRef.current = setTimeout(() => {
+            if (activeSessionRef.current) {
+              setStatus("waiting_input");
+            }
+          }, 250);
         } else if (payload.type === "stderr" && payload.data) {
           setStderr((prev) => prev + payload.data);
           setProblems((prev) => [...prev, ...parseCompilerDiagnostics(payload.data)]);
@@ -339,11 +381,24 @@ export function useCompilerRunner(): CompilerRunnerState {
             },
           ]);
         } else if (payload.type === "exit") {
+          if (waitingTimerRef.current) {
+            clearTimeout(waitingTimerRef.current);
+            waitingTimerRef.current = null;
+          }
           const codeNum = payload.code ?? 0;
           const duration = payload.durationMs ?? (Date.now() - startTime);
           setExitCode(codeNum);
           setDurationMs(duration);
-          setStatus(codeNum === 0 ? "success" : "error");
+
+          const fullErr = ((payload.data || "") + " " + (payload.stderr || "")).toLowerCase();
+          if (codeNum === 0) {
+            setStatus("completed");
+          } else if (fullErr.includes("time limit") || fullErr.includes("timed out")) {
+            setStatus("timed_out");
+          } else {
+            setStatus("runtime_error");
+          }
+
           setIsRunning(false);
           activeSessionRef.current = null;
           setActiveSessionId(null);
@@ -426,47 +481,26 @@ export function useCompilerRunner(): CompilerRunnerState {
           }
         }, 120);
       }
-    } catch {
-      // Fallback to direct batch compile endpoint
-      try {
-        const batchRes = await fetch("/api/compile", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code, stdin: fallbackStdin }),
-        });
-        const batchData = await batchRes.json();
-        const duration = batchData.durationMs ?? (Date.now() - startTime);
-        setDurationMs(duration);
-        if (batchData.success) {
-          setStatus("success");
-          setExitCode(0);
-          const outText = batchData.stdout || "[Program executed with empty output]";
-          setStdout(outText);
-          setTerminalEntries([
-            { id: "out-1", type: "stdout", text: outText },
-            { id: "exit-1", type: "exit", text: "[Process completed with exit code 0]", code: 0, durationMs: duration },
-          ]);
-        } else {
-          setStatus("error");
-          setExitCode(1);
-          const errText = batchData.error || batchData.stderr || "Unknown execution error";
-          setStderr(errText);
-          setProblems(parseCompilerDiagnostics(errText));
-          setTerminalEntries([
-            { id: "err-1", type: "stderr", text: errText },
-          ]);
-        }
-      } catch (err) {
-        setStatus("error");
-        setExitCode(1);
-        const msg = err instanceof Error ? err.message : "Compilation error";
-        setStderr(msg);
-        setTerminalEntries([{ id: "err-sys", type: "stderr", text: msg }]);
-      } finally {
-        setIsRunning(false);
-        activeSessionRef.current = null;
-        setActiveSessionId(null);
+    } catch (err: any) {
+      clearTimeout(slowTimer);
+      if (waitingTimerRef.current) {
+        clearTimeout(waitingTimerRef.current);
+        waitingTimerRef.current = null;
       }
+      setIsRunning(false);
+      setStatus("runtime_error");
+      setExitCode(1);
+      const errMsg = err?.message || "Execution session connection failed.";
+      setStderr(errMsg);
+      setTerminalEntries((prev) => [
+        ...prev,
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          type: "stderr",
+          text: `[Execution Error] ${errMsg}`,
+        },
+      ]);
+      setDurationMs(Date.now() - startTime);
     }
   }, [killSession, sendInput]);
 

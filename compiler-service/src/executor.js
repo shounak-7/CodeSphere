@@ -82,7 +82,7 @@ export async function executeCProgram({ code, stdin = '', timeoutMs = DEFAULT_TI
       return {
         success: false,
         phase: 'execution',
-        error: `Time Limit Exceeded: Process terminated after ${effectiveTimeout / 1000} seconds. Check for infinite loops or waiting for unprovided input.`,
+        error: `Time Limit Exceeded: Process terminated after ${effectiveTimeout / 1000} seconds. Check for infinite loops or prolonged execution.`,
         stdout: execResult.stdout,
         stderr: execResult.stderr,
         exitCode: null,
