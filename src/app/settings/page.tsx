@@ -19,35 +19,43 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { UserAvatar } from "@/components/ui/UserAvatar";
+import { useUserStore } from "@/lib/store/useUserStore";
 
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, setTheme, editorTheme, setEditorTheme } = useThemeStore();
+  const storeProfile = useUserStore((s) => s.profile);
 
   const [profile, setProfile] = useState<{
     full_name: string;
     username: string;
     avatar_url?: string;
-  } | null>(null);
+  } | null>(() => {
+    if (storeProfile) {
+      return {
+        full_name: storeProfile.full_name || "",
+        username: storeProfile.username || "",
+        avatar_url: storeProfile.avatar_url || "",
+      };
+    }
+    return null;
+  });
 
   useEffect(() => {
-    fetch("/api/profiles/me")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.profile) {
-          setProfile({
-            full_name: data.profile.full_name || "",
-            username: data.profile.username || "",
-            avatar_url: data.profile.avatar_url || "",
-          });
-        }
+    if (storeProfile) {
+      setProfile({
+        full_name: storeProfile.full_name || "",
+        username: storeProfile.username || "",
+        avatar_url: storeProfile.avatar_url || "",
       });
-  }, []);
+    } else {
+      useUserStore.getState().refreshProfile();
+    }
+  }, [storeProfile]);
 
   const handleSignOut = async () => {
     try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
+      await useUserStore.getState().signOut();
     } catch {}
     window.location.href = "/login?force=true";
   };

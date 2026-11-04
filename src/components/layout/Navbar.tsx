@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import {
@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { useThemeStore } from "@/lib/store/useThemeStore";
 import { useToastStore } from "@/lib/store/useToastStore";
+import { useUserStore } from "@/lib/store/useUserStore";
 import { createClient } from "@/lib/supabase/client";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { formatRelativeTime } from "@/lib/utils";
@@ -57,8 +58,8 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { theme, setTheme, resolvedTheme } = useThemeStore();
-  const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: Record<string, unknown> } | null>(null);
-  const [profile, setProfile] = useState<{ username: string; full_name: string; avatar_url: string; is_verified?: boolean } | null>(null);
+  const user = useUserStore((s) => s.user);
+  const profile = useUserStore((s) => s.profile);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
@@ -67,24 +68,12 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const notifRef = useRef<HTMLDivElement | null>(null);
-  const notifDropdownRef = useRef<HTMLDivElement | null>(null);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
-  const themeMenuRef = useRef<HTMLDivElement | null>(null);
-  const knownNotifIdsRef = useRef<Set<string>>(new Set());
+  const notifRef = useRef<HTMLDivElement>(null);
+  const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
   const isInitialNotifLoadRef = useRef(true);
-
-  const fetchProfile = async () => {
-    try {
-      const res = await fetch("/api/profiles/me");
-      const data = await res.json();
-      if (data.profile) {
-        setProfile(data.profile);
-      }
-    } catch {
-      // Ignore
-    }
-  };
+  const knownNotifIdsRef = useRef<Set<string>>(new Set());
 
   const userRef = useRef(user);
   useEffect(() => {
@@ -136,94 +125,78 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     }
   };
 
+  // Initialize global auth store
   useEffect(() => {
-    const supabase = createClient();
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-
-    const setupUserSession = (currentUser: { id: string; email?: string; user_metadata?: Record<string, unknown> } | null) => {
-      if (currentUser) {
-        setUser(currentUser);
-        fetchProfile();
-        fetchNotifications();
-
-        if (!channel) {
-          channel = supabase
-            .channel(`user-notifications-${currentUser.id}`)
-            .on("broadcast", { event: "new_notification" }, (payload) => {
-              if (payload?.payload) {
-                notifyUserOfEvent(payload.payload);
-                fetchNotifications();
-              }
-            })
-            .on(
-              "postgres_changes",
-              {
-                event: "*",
-                schema: "public",
-                table: "notifications",
-                filter: `recipient_id=eq.${currentUser.id}`,
-              },
-              () => {
-                fetchNotifications();
-              }
-            )
-            .subscribe();
-        }
-      } else {
-        setUser(null);
-        setProfile(null);
-        setNotifications([]);
-        setUnreadCount(0);
-        if (channel) {
-          supabase.removeChannel(channel);
-          channel = null;
-        }
-      }
+    const cleanupAuth = useUserStore.getState().initialize();
+    return () => {
+      cleanupAuth();
     };
+  }, []);
 
-    // 1. Check local session immediately
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setupUserSession(session.user);
-      }
-    }).catch(() => {});
+  // Real-time notifications and background listener setup
+  useEffect(() => {
+    if (!user?.id) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
 
-    // 2. Validate with getUser
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setupUserSession(user);
-      }
-    }).catch(() => {});
+    fetchNotifications();
 
-    // 3. Fallback: check server profile directly via cookie
-    fetch("/api/profiles/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.profile) {
-          setProfile(data.profile);
-          setUser((prev) => prev || { id: data.profile.id, user_metadata: {} });
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`user-notifications-${user.id}`)
+      .on("broadcast", { event: "new_notification" }, (payload) => {
+        if (payload?.payload) {
+          notifyUserOfEvent(payload.payload);
           fetchNotifications();
         }
       })
-      .catch(() => {});
-
-    // 4. Subscribe to auth state changes (login, logout, token refresh)
-    const {
-      data: { subscription: authSub },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setupUserSession(session?.user ?? null);
-    });
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "notifications",
+          filter: `recipient_id=eq.${user.id}`,
+        },
+        () => {
+          fetchNotifications();
+        }
+      )
+      .subscribe();
 
     const handleProfileUpdated = () => {
-      fetchProfile();
+      useUserStore.getState().refreshProfile();
     };
 
     const handleNotifUpdated = () => {
       fetchNotifications();
     };
 
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        fetchNotifications();
+      }
+    };
+
     window.addEventListener("profile-updated", handleProfileUpdated);
     window.addEventListener("notifications-updated", handleNotifUpdated);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    const interval = setInterval(fetchNotifications, 30000);
+
+    return () => {
+      window.removeEventListener("profile-updated", handleProfileUpdated);
+      window.removeEventListener("notifications-updated", handleNotifUpdated);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, fetchNotifications]);
+
+  // Click outside and escape listeners for dropdowns
+  useEffect(() => {
 
     // Click outside listener to prevent dropdowns from remaining stuck on main screen
     const handleClickOutside = (e: MouseEvent) => {
@@ -251,30 +224,12 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
       }
     };
 
-    const handleVisibilityChange = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "visible" && userRef.current) {
-        fetchNotifications();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleKeyDown);
 
-    // Dynamic background poll: 15s ensures timely updates without battery or network drain
-    const interval = setInterval(fetchNotifications, 15000);
-
     return () => {
-      authSub?.unsubscribe();
-      window.removeEventListener("profile-updated", handleProfileUpdated);
-      window.removeEventListener("notifications-updated", handleNotifUpdated);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
-      clearInterval(interval);
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
     };
   }, []);
 
@@ -289,11 +244,8 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
 
   const handleSignOut = async () => {
     try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
+      await useUserStore.getState().signOut();
     } catch {}
-    setUser(null);
-    setProfile(null);
     setNotifications([]);
     setUnreadCount(0);
     window.location.href = "/login?force=true";

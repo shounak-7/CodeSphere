@@ -39,7 +39,10 @@ export async function GET(request: Request) {
           (cp: any) => cp.program != null
         ),
       }));
-      return NextResponse.json({ collections: sanitized });
+      return NextResponse.json(
+        { collections: sanitized },
+        { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60" } }
+      );
     }
   } catch {
     // Fallback to local store
@@ -47,7 +50,10 @@ export async function GET(request: Request) {
 
   // Resilient fallback to local collections store
   const localCollections = await getLocalCollections();
-  return NextResponse.json({ collections: localCollections });
+  return NextResponse.json(
+    { collections: localCollections },
+    { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60" } }
+  );
 }
 
 export async function POST(request: Request) {

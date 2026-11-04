@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
+import { useUserStore } from "@/lib/store/useUserStore";
 import {
   FolderArchive,
   Code2,
@@ -55,35 +56,24 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
   const [selectedProgram, setSelectedProgram] = useState<CollectionProgram | null>(null);
   const [mobileTab, setMobileTab] = useState<"list" | "code">("list");
   const [importingId, setImportingId] = useState<string | null>(null);
-  const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
+  const user = useUserStore((s) => s.user);
+  const profile = useUserStore((s) => s.profile);
+  const currentUser = useMemo(() => {
+    if (!user) return null;
+    return {
+      id: user.id,
+      username:
+        profile?.username ||
+        (user.user_metadata?.user_name as string) ||
+        (user.user_metadata?.username as string) ||
+        user.email?.split("@")[0] ||
+        "",
+    };
+  }, [user, profile]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        const username =
-          (user.user_metadata?.user_name as string) ||
-          (user.user_metadata?.username as string) ||
-          user.email?.split("@")[0] ||
-          "";
-        setCurrentUser({ id: user.id, username });
-      }
-    });
-
-    fetch("/api/profiles/me")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.profile) {
-          setCurrentUser((prev) => ({
-            id: data.profile.id || prev?.id || "",
-            username: data.profile.username || prev?.username,
-          }));
-        }
-      })
-      .catch(() => {});
-
     fetch(`/api/collections/${id}`)
       .then((res) => res.json())
       .then((data) => {

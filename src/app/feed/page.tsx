@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { AppShell } from "@/components/layout/AppShell";
 import { PostComposer } from "@/components/feed/PostComposer";
 import { PostCard, Post } from "@/components/feed/PostCard";
-import { createClient } from "@/lib/supabase/client";
+import { useUserStore } from "@/lib/store/useUserStore";
 import { TrendingUp, HelpCircle, RefreshCw, Flame, Code2, Tag, X } from "lucide-react";
 import { ScrollableNav } from "@/components/ui/ScrollableNav";
 
@@ -17,7 +17,20 @@ export default function FeedPage() {
   const [posts, setPosts] = useState<Post[]>(() => cachedFeedPosts["latest:"] || cachedFeedPosts["latest"] || []);
   const [trendingTags, setTrendingTags] = useState<{ tag: string; count: number }[]>(() => cachedTrendingTags);
   const [loading, setLoading] = useState(() => !cachedFeedPosts["latest:"]?.length && !cachedFeedPosts["latest"]?.length);
-  const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
+  const user = useUserStore((s) => s.user);
+  const profile = useUserStore((s) => s.profile);
+  const currentUser = useMemo(() => {
+    if (!user) return null;
+    return {
+      id: user.id,
+      username:
+        profile?.username ||
+        (user.user_metadata?.user_name as string) ||
+        (user.user_metadata?.username as string) ||
+        user.email?.split("@")[0] ||
+        "developer",
+    };
+  }, [user, profile]);
 
   const fetchTrendingTags = useCallback(async () => {
     try {
@@ -61,28 +74,8 @@ export default function FeedPage() {
     }
   };
 
-  // Fetch user, trending tags, and pre-warm alternate tab on mount
+  // Fetch trending tags and pre-warm alternate tab on mount
   useEffect(() => {
-    fetch("/api/profiles/me")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.profile) {
-          setCurrentUser({ id: data.profile.id, username: data.profile.username });
-        }
-      })
-      .catch(() => {});
-
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        const fallbackUsername =
-          (user.user_metadata?.user_name as string) ||
-          user.email?.split("@")[0] ||
-          "developer";
-        setCurrentUser((prev) => prev || { id: user.id, username: fallbackUsername });
-      }
-    });
-
     fetchTrendingTags();
 
     // Pre-warm the alternate feed in background for instantaneous switching

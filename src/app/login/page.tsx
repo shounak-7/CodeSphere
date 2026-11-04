@@ -38,17 +38,17 @@ function LoginContent() {
     setMounted(true);
   }, []);
 
-  // If already logged in and not forced, redirect straight to target
+  // If already logged in and not forced, redirect straight to target (fast local check first)
   useEffect(() => {
     const isForced = searchParams.get("force") === "true";
     if (isForced) return;
 
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
         router.push(redirectTo);
       }
-    });
+    }).catch(() => {});
   }, [redirectTo, router, searchParams]);
 
   const toggleTheme = () => {

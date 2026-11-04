@@ -13,7 +13,10 @@ const UpdateProfileSchema = z.object({
   username: z.string().min(3).max(30).regex(/^[a-zA-Z0-9_.]+$/, "Username can only contain letters, numbers, underscores, and dots").optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const view = searchParams.get("view"); // "compact" | "full"
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -26,7 +29,31 @@ export async function GET() {
   const userId = user.id;
   const admin = createAdminClient();
 
-  // 1. Fetch profile, counts, programs, posts, and collections in a single parallel roundtrip
+  // Fast path for compact profile queries (e.g. Navbar, UserStore, composers)
+  if (view === "compact") {
+    try {
+      const { data: supaProfile } = await admin
+        .from("profiles")
+        .select("id, username, full_name, avatar_url, bio, college, skills, is_verified, created_at")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (supaProfile) {
+        return NextResponse.json(
+          { profile: supaProfile },
+          {
+            headers: {
+              "Cache-Control": "private, max-age=15, stale-while-revalidate=60",
+            },
+          }
+        );
+      }
+    } catch (err) {
+      console.warn("Compact profile fetch error:", err);
+    }
+  }
+
+  // Full profile query for /profile/me tabs
   try {
     const [
       profileRes,

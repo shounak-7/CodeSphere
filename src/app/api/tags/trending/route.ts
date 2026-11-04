@@ -29,9 +29,15 @@ export async function GET() {
           .map(([tag, count]) => ({ tag, count }))
           .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag))
           .slice(0, 10);
-        return NextResponse.json({ tags: sorted });
+        return NextResponse.json(
+          { tags: sorted },
+          { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } }
+        );
       } else if (posts.length > 0) {
-        return NextResponse.json({ tags: [] });
+        return NextResponse.json(
+          { tags: [] },
+          { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } }
+        );
       }
     }
   } catch (err) {
@@ -39,5 +45,8 @@ export async function GET() {
   }
 
   const tags = await getRealTrendingTags();
-  return NextResponse.json({ tags });
+  return NextResponse.json(
+    { tags },
+    { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=30" } }
+  );
 }

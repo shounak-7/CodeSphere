@@ -30,9 +30,7 @@ export async function GET(request: Request) {
       .select(
         `
         *,
-        author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url),
-        post_likes(user_id),
-        comments(id)
+        author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)
       `
       )
       .order("created_at", { ascending: false })
@@ -50,15 +48,30 @@ export async function GET(request: Request) {
 
     if (!error && posts && posts.length > 0) {
       let bookmarkedIds = new Set<string>();
+      let likedIds = new Set<string>();
+
       if (user) {
+        const postIds = posts.map((p) => p.id);
         try {
-          const { data: userBookmarks } = await supabase
-            .from("bookmarks")
-            .select("target_id")
-            .eq("user_id", user.id)
-            .eq("target_type", "post");
-          if (userBookmarks && userBookmarks.length > 0) {
-            bookmarkedIds = new Set(userBookmarks.map((b: { target_id: string }) => b.target_id));
+          const [likesRes, bookmarksRes] = await Promise.all([
+            supabase
+              .from("post_likes")
+              .select("post_id")
+              .eq("user_id", user.id)
+              .in("post_id", postIds),
+            supabase
+              .from("bookmarks")
+              .select("target_id")
+              .eq("user_id", user.id)
+              .eq("target_type", "post")
+              .in("target_id", postIds),
+          ]);
+
+          if (likesRes.data) {
+            likedIds = new Set(likesRes.data.map((l: { post_id: string }) => l.post_id));
+          }
+          if (bookmarksRes.data && bookmarksRes.data.length > 0) {
+            bookmarkedIds = new Set(bookmarksRes.data.map((b: { target_id: string }) => b.target_id));
           } else {
             const localBookmarks = await getLocalBookmarks(user.id);
             bookmarkedIds = new Set(localBookmarks.map((b) => b.target_id));
@@ -68,20 +81,23 @@ export async function GET(request: Request) {
           bookmarkedIds = new Set(localBookmarks.map((b) => b.target_id));
         }
       }
-      const formattedPosts = posts.map((post) => {
-        const isLiked = user ? post.post_likes?.some((l: { user_id: string }) => l.user_id === user.id) : false;
-        const likesCount = post.post_likes?.length || post.likes_count || 0;
-        const commentsCount = typeof post.comments?.length === "number" ? post.comments.length : (post.comments_count || 0);
-        return {
-          ...post,
-          is_liked: isLiked,
-          is_bookmarked: bookmarkedIds.has(post.id),
-          likes_count: likesCount,
-          comments_count: commentsCount,
-        };
-      });
 
-      return NextResponse.json({ posts: formattedPosts });
+      const formattedPosts = posts.map((post) => ({
+        ...post,
+        is_liked: likedIds.has(post.id),
+        is_bookmarked: bookmarkedIds.has(post.id),
+        likes_count: post.likes_count || 0,
+        comments_count: post.comments_count || 0,
+      }));
+
+      return NextResponse.json(
+        { posts: formattedPosts },
+        {
+          headers: {
+            "Cache-Control": "private, max-age=3, stale-while-revalidate=15",
+          },
+        }
+      );
     }
   } catch {
     // Fall back to local store

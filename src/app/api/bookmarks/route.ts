@@ -85,7 +85,10 @@ export async function GET(request: Request) {
           collection: b.target_type === "collection" ? colsMap.get(b.target_id) || null : null,
         }));
 
-        return NextResponse.json({ bookmarks: enriched });
+        return NextResponse.json(
+          { bookmarks: enriched },
+          { headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=30" } }
+        );
       }
     }
   } catch (err) {
@@ -93,7 +96,10 @@ export async function GET(request: Request) {
   }
 
   const localBookmarks = await getLocalBookmarks(userId);
-  return NextResponse.json({ bookmarks: localBookmarks });
+  return NextResponse.json(
+    { bookmarks: localBookmarks },
+    { headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=30" } }
+  );
 }
 
 export async function POST(request: Request) {

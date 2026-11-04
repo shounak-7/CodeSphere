@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/AppShell";
+import { useUserStore } from "@/lib/store/useUserStore";
 import {
   FolderArchive,
   FolderPlus,
@@ -55,11 +56,26 @@ const FOLDER_GRADIENTS = [
   "from-rose-500 via-pink-500 to-rose-600 shadow-rose-500/20",
 ];
 
+let cachedCollections: Collection[] | null = null;
+
 export default function CollectionsPage() {
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [collections, setCollections] = useState<Collection[]>(() => cachedCollections || []);
+  const [loading, setLoading] = useState(() => !cachedCollections);
   const [search, setSearch] = useState("");
-  const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
+  const user = useUserStore((s) => s.user);
+  const profile = useUserStore((s) => s.profile);
+  const currentUser = useMemo(() => {
+    if (!user) return null;
+    return {
+      id: user.id,
+      username:
+        profile?.username ||
+        (user.user_metadata?.user_name as string) ||
+        (user.user_metadata?.username as string) ||
+        user.email?.split("@")[0] ||
+        "",
+    };
+  }, [user, profile]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Modal State
@@ -75,12 +91,15 @@ export default function CollectionsPage() {
   const [loadingWorkspace, setLoadingWorkspace] = useState(false);
 
   const fetchCollections = async () => {
-    setLoading(true);
+    if (!cachedCollections) {
+      setLoading(true);
+    }
     try {
       const res = await fetch("/api/collections");
       const data = await res.json();
       if (Array.isArray(data.collections)) {
         setCollections(data.collections);
+        cachedCollections = data.collections;
       }
     } finally {
       setLoading(false);
@@ -102,29 +121,6 @@ export default function CollectionsPage() {
 
   useEffect(() => {
     fetchCollections();
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        const username =
-          (user.user_metadata?.user_name as string) ||
-          (user.user_metadata?.username as string) ||
-          user.email?.split("@")[0] ||
-          "";
-        setCurrentUser({ id: user.id, username });
-      }
-    });
-
-    fetch("/api/profiles/me")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.profile) {
-          setCurrentUser((prev) => ({
-            id: data.profile.id || prev?.id || "",
-            username: data.profile.username || prev?.username,
-          }));
-        }
-      })
-      .catch(() => {});
   }, []);
 
   const handleDeleteCollection = (col: Collection, e: React.MouseEvent) => {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -18,33 +19,39 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      // Ensure user profile exists
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
-      if (user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("id", user.id)
-          .maybeSingle();
+    if (!error && data?.user) {
+      const user = data.user;
 
-        if (!profile) {
-          const emailPrefix = user.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "") || "coder";
-          const username = `${emailPrefix}_${user.id.substring(0, 5)}`;
-          const fullName = user.user_metadata?.full_name || user.user_metadata?.name || emailPrefix;
-          const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture || "";
+      // Ensure profile exists with an idempotent background upsert (zero redundant roundtrips)
+      try {
+        const admin = createAdminClient();
+        const emailPrefix = user.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "") || "coder";
+        const username =
+          (user.user_metadata?.user_name as string) ||
+          (user.user_metadata?.username as string) ||
+          `${emailPrefix}_${user.id.substring(0, 5)}`;
+        const fullName =
+          (user.user_metadata?.full_name as string) ||
+          (user.user_metadata?.name as string) ||
+          emailPrefix;
+        const avatarUrl =
+          (user.user_metadata?.avatar_url as string) ||
+          (user.user_metadata?.picture as string) ||
+          "";
 
-          await supabase.from("profiles").insert({
+        await admin.from("profiles").upsert(
+          {
             id: user.id,
             username,
             full_name: fullName,
             avatar_url: avatarUrl,
-          });
-        }
+          },
+          { onConflict: "id", ignoreDuplicates: true }
+        );
+      } catch (profileErr) {
+        console.warn("Profile upsert during auth callback warning:", profileErr);
       }
 
       return NextResponse.redirect(`${redirectBase}${next}`);

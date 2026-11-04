@@ -38,19 +38,24 @@ interface NotificationItem {
   created_at: string;
 }
 
+let cachedNotifs: NotificationItem[] | null = null;
+
 export default function NotificationsPage() {
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => cachedNotifs || []);
+  const [loading, setLoading] = useState(() => !cachedNotifs);
   const [filter, setFilter] = useState<"all" | "like" | "comment" | "follow">("all");
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
 
   const loadNotifications = async () => {
-    setLoading(true);
+    if (!cachedNotifs) {
+      setLoading(true);
+    }
     try {
       const res = await fetch("/api/notifications");
       const data = await res.json();
       if (data.notifications) {
         setNotifications(data.notifications);
+        cachedNotifs = data.notifications;
 
         // Automatically mark all as read once the user views notifications
         const hasUnread = data.notifications.some((n: NotificationItem) => !n.is_read);

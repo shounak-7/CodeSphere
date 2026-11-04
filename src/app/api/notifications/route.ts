@@ -93,7 +93,10 @@ export async function GET() {
         };
       });
 
-      return NextResponse.json({ notifications: enriched });
+      return NextResponse.json(
+        { notifications: enriched },
+        { headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=15" } }
+      );
     }
   } catch (err) {
     console.warn("Supabase notifications fetch error:", err);
@@ -101,7 +104,10 @@ export async function GET() {
 
   try {
     const local = await getLocalNotifications(userId, username || undefined);
-    return NextResponse.json({ notifications: local });
+    return NextResponse.json(
+      { notifications: local },
+      { headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=15" } }
+    );
   } catch {}
 
   return NextResponse.json({ notifications: [] });

@@ -36,6 +36,7 @@ import { useToastStore } from "@/lib/store/useToastStore";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ModalPortal } from "@/components/ui/ModalPortal";
 import { VerifiedBadge, isTeamAccount, isVerifiedAccount } from "@/components/ui/VerifiedBadge";
+import { useUserStore } from "@/lib/store/useUserStore";
 
 interface ProfileData {
   profile: {
@@ -91,7 +92,17 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   const [isHoveringFollow, setIsHoveringFollow] = useState(false);
   const [followersCount, setFollowersCount] = useState(() => cachedProfileData[username]?.stats?.followersCount || 0);
   const [followingCount, setFollowingCount] = useState(() => cachedProfileData[username]?.stats?.followingCount || 0);
-  const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
+  const storeUser = useUserStore((s) => s.user);
+  const storeProfile = useUserStore((s) => s.profile);
+  const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(() => {
+    if (storeUser) {
+      return {
+        id: storeUser.id,
+        username: storeProfile?.username || storeUser.email?.split("@")[0] || "",
+      };
+    }
+    return null;
+  });
   const [verifying, setVerifying] = useState(false);
 
   // Edit Profile Modal State
@@ -157,21 +168,17 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
     // 1. Fetch profile data immediately without blocking
     fetchProfile();
 
-    // 2. If viewing another profile, retrieve current user session once
-    if (username !== "me") {
-      const supabase = createClient();
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        if (user) {
-          const fallbackUsername =
-            (user.user_metadata?.user_name as string) ||
-            (user.user_metadata?.username as string) ||
-            user.email?.split("@")[0] ||
-            "";
-          setCurrentUser({ id: user.id, username: fallbackUsername });
-        }
-      });
+    // 2. If viewing another profile, retrieve current user from cache/store
+    if (username !== "me" && storeUser) {
+      const fallbackUsername =
+        storeProfile?.username ||
+        (storeUser.user_metadata?.user_name as string) ||
+        (storeUser.user_metadata?.username as string) ||
+        storeUser.email?.split("@")[0] ||
+        "";
+      setCurrentUser({ id: storeUser.id, username: fallbackUsername });
     }
-  }, [username]);
+  }, [username, storeUser, storeProfile]);
 
   const handleToggleVerifyUser = async () => {
     if (!data?.profile) return;

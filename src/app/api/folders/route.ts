@@ -23,7 +23,10 @@ export async function GET() {
         .order("name", { ascending: true });
 
       if (!error && folders) {
-        return NextResponse.json({ folders });
+        return NextResponse.json(
+          { folders },
+          { headers: { "Cache-Control": "private, max-age=10, stale-while-revalidate=60" } }
+        );
       }
     } catch {
       // Fallback
@@ -31,7 +34,10 @@ export async function GET() {
   }
 
   const folders = await getLocalFolders(user?.id);
-  return NextResponse.json({ folders });
+  return NextResponse.json(
+    { folders },
+    { headers: { "Cache-Control": "private, max-age=10, stale-while-revalidate=60" } }
+  );
 }
 
 export async function POST(request: Request) {

@@ -36,6 +36,33 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
+  // Cookie-level fast path: inspect request cookies before executing remote HTTPS network calls
+  const allCookies = request.cookies.getAll();
+  const hasAuthCookie = allCookies.some(
+    (c) => c.name.includes("auth-token") || c.name.includes("access-token") || c.name.startsWith("sb-")
+  );
+
+  // If visiting a protected path with zero auth cookies, redirect to /login immediately (0ms network cost)
+  if (isProtectedPath && !hasAuthCookie) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    url.searchParams.set("redirectTo", pathname);
+    return NextResponse.redirect(url);
+  }
+
+  // If visiting /login with zero auth cookies, return immediately without calling getUser()
+  if (isLoginPath && !hasAuthCookie) {
+    return supabaseResponse;
+  }
+
+  // Fast path for Next.js router link prefetching (hovering over links shouldn't block on remote auth verification)
+  const isPrefetch =
+    request.headers.get("next-router-prefetch") === "1" ||
+    request.headers.get("purpose") === "prefetch";
+  if (isPrefetch && hasAuthCookie) {
+    return supabaseResponse;
+  }
+
   try {
     const supabase = createServerClient(supabaseUrl, supabaseKey, {
       cookies: {

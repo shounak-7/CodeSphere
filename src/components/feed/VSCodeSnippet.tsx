@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
 import { Check, Copy, FolderPlus, Code2 } from "lucide-react";
 import { useToastStore } from "@/lib/store/useToastStore";
 
@@ -116,7 +116,7 @@ function highlightCLine(line: string) {
   );
 }
 
-export function VSCodeSnippet({
+function VSCodeSnippetComponent({
   code,
   filename = "solution.c",
   onAddToWorkspace,
@@ -206,3 +206,5 @@ export function VSCodeSnippet({
     </div>
   );
 }
+
+export const VSCodeSnippet = memo(VSCodeSnippetComponent);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,7 +28,7 @@ const iconSizes = {
   xl: "w-10 h-10",
 };
 
-export function UserAvatar({
+function UserAvatarComponent({
   src,
   alt = "User avatar",
   size = "md",
@@ -54,6 +54,8 @@ export function UserAvatar({
       <img
         src={src}
         alt={alt}
+        loading="lazy"
+        decoding="async"
         referrerPolicy="no-referrer"
         crossOrigin="anonymous"
         onError={() => setImgError(true)}
@@ -103,3 +105,5 @@ export function UserAvatar({
     </div>
   );
 }
+
+export const UserAvatar = memo(UserAvatarComponent);
