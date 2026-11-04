@@ -45,9 +45,11 @@ export default function SettingsPage() {
   }, []);
 
   const handleSignOut = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } catch {}
+    window.location.href = "/login?force=true";
   };
 
   return (

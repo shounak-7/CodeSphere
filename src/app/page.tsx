@@ -247,7 +247,7 @@ Factorial of 5 = 120
             <Link href="/collections" className="hover:text-foreground transition-colors">
               Collections
             </Link>
-            <Link href="/login" className="hover:text-foreground transition-colors">
+            <Link href="/login?force=true" className="hover:text-foreground transition-colors">
               Sign In
             </Link>
           </div>
