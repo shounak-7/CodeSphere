@@ -71,6 +71,8 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
   const notifDropdownRef = useRef<HTMLDivElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const themeMenuRef = useRef<HTMLDivElement | null>(null);
+  const knownNotifIdsRef = useRef<Set<string>>(new Set());
+  const isInitialNotifLoadRef = useRef(true);
 
   const fetchProfile = async () => {
     try {
@@ -84,14 +86,43 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     }
   };
 
+  const notifyUserOfEvent = (notification: {
+    notification_type: string;
+    actor?: { username?: string; full_name?: string };
+  }) => {
+    const actorName =
+      notification.actor?.full_name ||
+      (notification.actor?.username ? `@${notification.actor.username}` : "Someone");
+
+    if (notification.notification_type === "like") {
+      useToastStore.getState().addToast(`❤️ ${actorName} liked your post!`, "info");
+    } else if (notification.notification_type === "comment") {
+      useToastStore.getState().addToast(`💬 ${actorName} commented on your post!`, "info");
+    } else if (notification.notification_type === "follow") {
+      useToastStore.getState().addToast(`👤 ${actorName} started following you!`, "info");
+    }
+  };
+
   const fetchNotifications = async () => {
     try {
       const res = await fetch("/api/notifications");
       const data = await res.json();
       if (Array.isArray(data.notifications)) {
-        setNotifications(data.notifications);
-        const unread = data.notifications.filter((n: NotificationItem) => !n.is_read).length;
+        const notifs = data.notifications as NotificationItem[];
+        setNotifications(notifs);
+        const unread = notifs.filter((n: NotificationItem) => !n.is_read).length;
         setUnreadCount(unread);
+
+        // Display pop-up toasts for newly received unread notifications
+        if (!isInitialNotifLoadRef.current) {
+          const freshNotifs = notifs.filter((n) => !n.is_read && !knownNotifIdsRef.current.has(n.id));
+          for (const n of freshNotifs) {
+            notifyUserOfEvent(n);
+          }
+        }
+
+        notifs.forEach((n) => knownNotifIdsRef.current.add(n.id));
+        isInitialNotifLoadRef.current = false;
       }
     } catch {
       // Ignore
@@ -111,6 +142,12 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
         if (!channel) {
           channel = supabase
             .channel(`user-notifications-${currentUser.id}`)
+            .on("broadcast", { event: "new_notification" }, (payload) => {
+              if (payload?.payload) {
+                notifyUserOfEvent(payload.payload);
+                fetchNotifications();
+              }
+            })
             .on(
               "postgres_changes",
               {
@@ -210,8 +247,8 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleKeyDown);
 
-    // Periodic fallback poll (reduced from 20s to 60s since Realtime is active)
-    const interval = setInterval(fetchNotifications, 60000);
+    // Periodic fallback poll (8s ensures prompt updates even on network drops)
+    const interval = setInterval(fetchNotifications, 8000);
 
     return () => {
       authSub?.unsubscribe();

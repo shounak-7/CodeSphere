@@ -8,12 +8,15 @@ import { createClient } from "@/lib/supabase/client";
 import { TrendingUp, HelpCircle, RefreshCw, Flame, Code2, Tag, X } from "lucide-react";
 import { ScrollableNav } from "@/components/ui/ScrollableNav";
 
+let cachedFeedPosts: Record<string, Post[]> = {};
+let cachedTrendingTags: { tag: string; count: number }[] = [];
+
 export default function FeedPage() {
-  const [posts, setPosts] = useState<Post[]>([]);
   const [activeTab, setActiveTab] = useState<"latest" | "questions">("latest");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [trendingTags, setTrendingTags] = useState<{ tag: string; count: number }[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [posts, setPosts] = useState<Post[]>(() => cachedFeedPosts["latest"] || []);
+  const [trendingTags, setTrendingTags] = useState<{ tag: string; count: number }[]>(() => cachedTrendingTags);
+  const [loading, setLoading] = useState(() => !cachedFeedPosts["latest"]?.length);
   const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
 
   const fetchTrendingTags = useCallback(async () => {
@@ -22,18 +25,23 @@ export default function FeedPage() {
       const data = await res.json();
       if (Array.isArray(data.tags)) {
         setTrendingTags(data.tags);
+        cachedTrendingTags = data.tags;
       }
     } catch {}
   }, []);
 
   const fetchPosts = useCallback(async () => {
-    setLoading(true);
+    const cacheKey = `${activeTab}:${selectedTag || ""}`;
+    if (!cachedFeedPosts[cacheKey]?.length) {
+      setLoading(true);
+    }
     try {
       const tagQuery = selectedTag ? `&tag=${encodeURIComponent(selectedTag)}` : "";
       const res = await fetch(`/api/posts?tab=${activeTab}${tagQuery}`);
       const data = await res.json();
       if (data.posts) {
         setPosts(data.posts);
+        cachedFeedPosts[cacheKey] = data.posts;
       }
     } finally {
       setLoading(false);

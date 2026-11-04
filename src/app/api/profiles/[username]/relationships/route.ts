@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getLocalRelationships,
   removeLocalFollower,
   toggleLocalFollow,
   getLocalProfile,
+  isUserVerified,
 } from "@/lib/storage/communityStore";
 
 export async function GET(
@@ -23,6 +25,90 @@ export async function GET(
       (currentUser.user_metadata?.username as string) ||
       currentUser.email?.split("@")[0]
     : undefined;
+
+  const targetUsername = username === "me" ? currentUsername || "codesphere" : username;
+
+  try {
+    // 1. Resolve target user's Supabase ID
+    let targetProfileId: string | null = null;
+    if (username === "me" && currentUserId) {
+      targetProfileId = currentUserId;
+    } else {
+      const { data: tp } = await supabase
+        .from("profiles")
+        .select("id")
+        .ilike("username", targetUsername)
+        .maybeSingle();
+      targetProfileId = tp?.id || null;
+    }
+
+    if (targetProfileId) {
+      // 2. Fetch followers, following, and current user's following list in parallel
+      const [followersRes, followingRes, myFollowingRes] = await Promise.all([
+        supabase
+          .from("follows")
+          .select(`
+            follower:profiles!follows_follower_id_fkey(id, username, full_name, avatar_url, bio)
+          `)
+          .eq("following_id", targetProfileId),
+        supabase
+          .from("follows")
+          .select(`
+            following:profiles!follows_following_id_fkey(id, username, full_name, avatar_url, bio)
+          `)
+          .eq("follower_id", targetProfileId),
+        currentUserId
+          ? supabase
+              .from("follows")
+              .select("following_id")
+              .eq("follower_id", currentUserId)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const myFollowingSet = new Set(
+        ((myFollowingRes?.data || []) as { following_id: string }[]).map((f) => f.following_id)
+      );
+
+      const followers = ((followersRes.data || []) as any[])
+        .map((row) => row.follower)
+        .filter(Boolean)
+        .map((u) => ({
+          id: u.id,
+          username: u.username,
+          full_name: u.full_name || u.username,
+          avatar_url: u.avatar_url || "",
+          bio: u.bio || "",
+          is_following: myFollowingSet.has(u.id),
+          is_self: currentUserId === u.id,
+          is_verified: isUserVerified(u.username),
+        }));
+
+      const following = ((followingRes.data || []) as any[])
+        .map((row) => row.following)
+        .filter(Boolean)
+        .map((u) => ({
+          id: u.id,
+          username: u.username,
+          full_name: u.full_name || u.username,
+          avatar_url: u.avatar_url || "",
+          bio: u.bio || "",
+          is_following: myFollowingSet.has(u.id),
+          is_self: currentUserId === u.id,
+          is_verified: isUserVerified(u.username),
+        }));
+
+      return NextResponse.json(
+        { followers, following },
+        {
+          headers: {
+            "Cache-Control": "private, max-age=5, stale-while-revalidate=15",
+          },
+        }
+      );
+    }
+  } catch (err) {
+    console.warn("Supabase relationships fetch failed, using local store:", err);
+  }
 
   const data = await getLocalRelationships(username, currentUserId, currentUsername);
   return NextResponse.json(data);
@@ -53,24 +139,25 @@ export async function DELETE(
       return NextResponse.json({ error: "Missing targetUsername" }, { status: 400 });
     }
 
+    const admin = createAdminClient();
+
     // 1. Remove follower action: removes target from the owner's followers list
     if (action === "remove_follower") {
-      const ownerProfile = await getLocalProfile(username === "me" ? currentUsername : username);
-      const targetProfile = await getLocalProfile(targetUsername);
+      const ownerUsername = username === "me" ? currentUsername : username;
+      const { data: ownerProfile } = await admin
+        .from("profiles")
+        .select("id")
+        .ilike("username", ownerUsername)
+        .maybeSingle();
+      const { data: targetProfile } = await admin
+        .from("profiles")
+        .select("id")
+        .ilike("username", targetUsername)
+        .maybeSingle();
 
-      const ownerObj = {
-        id: ownerProfile?.id || currentUserId,
-        username: ownerProfile?.username || username,
-      };
-      const targetObj = {
-        id: targetProfile?.id || `user-${targetUsername}`,
-        username: targetProfile?.username || targetUsername,
-      };
-
-      // Best effort Supabase remove
-      if (currentUser && ownerProfile?.id && targetProfile?.id) {
+      if (ownerProfile?.id && targetProfile?.id) {
         try {
-          await supabase
+          await admin
             .from("follows")
             .delete()
             .eq("follower_id", targetProfile.id)
@@ -80,27 +167,29 @@ export async function DELETE(
         }
       }
 
+      const ownerObj = {
+        id: ownerProfile?.id || currentUserId,
+        username: ownerUsername,
+      };
+      const targetObj = {
+        id: targetProfile?.id || `user-${targetUsername}`,
+        username: targetUsername,
+      };
       const result = await removeLocalFollower(ownerObj, targetObj);
       return NextResponse.json({ success: true, followersCount: result.followersCount });
     }
 
     // 2. Unfollow action: current user unfollows target
     if (action === "unfollow") {
-      const targetProfile = await getLocalProfile(targetUsername);
+      const { data: targetProfile } = await admin
+        .from("profiles")
+        .select("id")
+        .ilike("username", targetUsername)
+        .maybeSingle();
 
-      const followerObj = {
-        id: currentUserId,
-        username: currentUsername,
-      };
-      const targetObj = {
-        id: targetProfile?.id || `user-${targetUsername}`,
-        username: targetProfile?.username || targetUsername,
-      };
-
-      // Best effort Supabase unfollow
       if (currentUser && targetProfile?.id) {
         try {
-          await supabase
+          await admin
             .from("follows")
             .delete()
             .eq("follower_id", currentUser.id)
@@ -110,6 +199,14 @@ export async function DELETE(
         }
       }
 
+      const followerObj = {
+        id: currentUserId,
+        username: currentUsername,
+      };
+      const targetObj = {
+        id: targetProfile?.id || `user-${targetUsername}`,
+        username: targetUsername,
+      };
       const result = await toggleLocalFollow(followerObj, targetObj);
       return NextResponse.json({ success: true, following: result.following });
     }

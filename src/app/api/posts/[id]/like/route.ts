@@ -95,6 +95,20 @@ export async function POST(
             reference_id: postId,
             is_read: false,
           });
+
+          // Real-time broadcast dispatch
+          try {
+            const channel = admin.channel(`user-notifications-${currentPost.author_id}`);
+            await channel.send({
+              type: "broadcast",
+              event: "new_notification",
+              payload: {
+                notification_type: "like",
+                reference_id: postId,
+                actor: userMeta,
+              },
+            });
+          } catch {}
         }
       }
 

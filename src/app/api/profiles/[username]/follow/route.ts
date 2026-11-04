@@ -116,7 +116,23 @@ export async function POST(
               recipient_id: targetProfileId,
               actor_id: currentUser.id,
               notification_type: "follow",
-              read: false,
+              reference_id: currentUser.id,
+              is_read: false,
+            });
+
+            // Real-time broadcast dispatch
+            const channel = adminSupabase.channel(`user-notifications-${targetProfileId}`);
+            await channel.send({
+              type: "broadcast",
+              event: "new_notification",
+              payload: {
+                notification_type: "follow",
+                actor: {
+                  username: currentUsername,
+                  full_name: currentFullName,
+                  avatar_url: currentAvatar,
+                },
+              },
             });
           } catch (notifErr) {
             console.warn("Follow notification dispatch warning:", notifErr);

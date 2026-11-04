@@ -114,7 +114,7 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   const [modalFollowActionLoading, setModalFollowActionLoading] = useState<Record<string, boolean>>({});
 
   const fetchProfile = async () => {
-    setLoading(true);
+    if (!data) setLoading(true);
     try {
       const endpoint = username === "me" ? "/api/profiles/me" : `/api/profiles/${username}`;
       const res = await fetch(endpoint);
@@ -214,7 +214,9 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   };
 
   const fetchRelationships = async () => {
-    setNetworkLoading(true);
+    if (networkUsers.followers.length === 0 && networkUsers.following.length === 0) {
+      setNetworkLoading(true);
+    }
     try {
       const targetUser = data?.profile.username || username;
       const res = await fetch(`/api/profiles/${targetUser}/relationships`);

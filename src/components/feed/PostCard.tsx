@@ -226,6 +226,21 @@ export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }
       return;
     }
     setShowComments(true);
+
+    // If comments are already loaded, display instantly and revalidate in background
+    if (comments.length > 0) {
+      fetch(`/api/posts/${post.id}/comments`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.comments) {
+            setComments(data.comments);
+            setCommentsCount(data.comments.length);
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+
     setLoadingComments(true);
     try {
       const res = await fetch(`/api/posts/${post.id}/comments`);

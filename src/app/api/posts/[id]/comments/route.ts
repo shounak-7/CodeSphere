@@ -27,7 +27,14 @@ export async function GET(
       .order("created_at", { ascending: true });
 
     if (!error && comments) {
-      return NextResponse.json({ comments });
+      return NextResponse.json(
+        { comments },
+        {
+          headers: {
+            "Cache-Control": "public, s-maxage=3, stale-while-revalidate=20",
+          },
+        }
+      );
     }
   } catch {
     // Fall back to local store
@@ -149,6 +156,20 @@ export async function POST(
                   reference_id: postId,
                   is_read: false,
                 });
+
+                // Real-time broadcast dispatch
+                try {
+                  const channel = admin.channel(`user-notifications-${currentPost.author_id}`);
+                  await channel.send({
+                    type: "broadcast",
+                    event: "new_notification",
+                    payload: {
+                      notification_type: "comment",
+                      reference_id: postId,
+                      actor: authorMeta,
+                    },
+                  });
+                } catch {}
               }
             }
           } catch (notifErr) {

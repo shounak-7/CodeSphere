@@ -72,6 +72,7 @@ export function Sidebar({ isOpen, onClose, isDesktopHidden = false }: SidebarPro
               <Link
                 key={item.name}
                 href={item.href}
+                prefetch={true}
                 onClick={onClose}
                 className={cn(
                   "flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-sm font-medium transition-all duration-200 group active:scale-[0.98] cursor-pointer",
