@@ -127,7 +127,7 @@ export async function POST(
             const admin = createAdminClient();
             const { data: currentPost } = await admin
               .from("posts")
-              .select("comments_count, author_id")
+              .select("comments_count, author_id, title")
               .eq("id", postId)
               .single();
 
@@ -167,6 +167,8 @@ export async function POST(
                       notification_type: "comment",
                       reference_id: postId,
                       actor: authorMeta,
+                      comment_text: content.slice(0, 80),
+                      post_title: currentPost.title || undefined,
                     },
                   });
                 } catch {}

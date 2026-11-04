@@ -667,8 +667,12 @@ export default function WorkspacePage() {
             {/* 3-bar Menu button at the top of Activity Bar */}
             <button
               type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent("toggle-sidebar"))}
-              className="relative w-10 h-10 flex items-center justify-center rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-white/[0.06] transition-all cursor-pointer"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.dispatchEvent(new CustomEvent("toggle-sidebar"));
+              }}
+              className="relative w-10 h-10 flex items-center justify-center rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-white/[0.06] active:scale-95 transition-all cursor-pointer"
               title="Toggle Navigation Menu"
               aria-label="Toggle Navigation Menu"
             >

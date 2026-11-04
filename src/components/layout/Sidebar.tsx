@@ -38,12 +38,12 @@ export function Sidebar({ isOpen, onClose, isDesktopHidden = false }: SidebarPro
 
   return (
     <>
-      {/* Mobile/Tablet Backdrop */}
+      {/* Backdrop (visible whenever drawer is open as a temporary flyout) */}
       {isOpen && (
         <div
           className={cn(
-            "fixed inset-0 z-40 bg-black/60 backdrop-blur-xs",
-            isDesktopHidden ? "lg:hidden" : "md:hidden"
+            "fixed inset-0 z-40 bg-black/60 backdrop-blur-xs transition-opacity duration-200",
+            !isDesktopHidden && "md:hidden"
           )}
           onClick={onClose}
         />
@@ -52,10 +52,8 @@ export function Sidebar({ isOpen, onClose, isDesktopHidden = false }: SidebarPro
       {/* Sidebar Container */}
       <aside
         className={cn(
-          "fixed top-14 sm:top-16 bottom-0 left-0 z-40 w-64 flex-shrink-0 border-r border-border bg-card flex flex-col justify-between transition-transform duration-200 ease-in-out shadow-xs",
-          isDesktopHidden
-            ? "lg:hidden"
-            : "md:relative md:top-0 md:h-full md:translate-x-0",
+          "fixed top-14 sm:top-16 bottom-0 left-0 z-50 w-64 flex-shrink-0 border-r border-border bg-card flex flex-col justify-between transition-transform duration-200 ease-in-out shadow-2xl",
+          !isDesktopHidden && "md:relative md:top-0 md:h-full md:translate-x-0 md:shadow-none md:z-30",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >

@@ -14,9 +14,9 @@ let cachedTrendingTags: { tag: string; count: number }[] = [];
 export default function FeedPage() {
   const [activeTab, setActiveTab] = useState<"latest" | "questions">("latest");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [posts, setPosts] = useState<Post[]>(() => cachedFeedPosts["latest"] || []);
+  const [posts, setPosts] = useState<Post[]>(() => cachedFeedPosts["latest:"] || cachedFeedPosts["latest"] || []);
   const [trendingTags, setTrendingTags] = useState<{ tag: string; count: number }[]>(() => cachedTrendingTags);
-  const [loading, setLoading] = useState(() => !cachedFeedPosts["latest"]?.length);
+  const [loading, setLoading] = useState(() => !cachedFeedPosts["latest:"]?.length && !cachedFeedPosts["latest"]?.length);
   const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
 
   const fetchTrendingTags = useCallback(async () => {
@@ -30,25 +30,38 @@ export default function FeedPage() {
     } catch {}
   }, []);
 
-  const fetchPosts = useCallback(async () => {
-    const cacheKey = `${activeTab}:${selectedTag || ""}`;
+  const fetchPosts = useCallback(async (tabToFetch = activeTab, tagToFetch = selectedTag) => {
+    const cacheKey = `${tabToFetch}:${tagToFetch || ""}`;
     if (!cachedFeedPosts[cacheKey]?.length) {
       setLoading(true);
     }
     try {
-      const tagQuery = selectedTag ? `&tag=${encodeURIComponent(selectedTag)}` : "";
-      const res = await fetch(`/api/posts?tab=${activeTab}${tagQuery}`);
+      const tagQuery = tagToFetch ? `&tag=${encodeURIComponent(tagToFetch)}` : "";
+      const res = await fetch(`/api/posts?tab=${tabToFetch}${tagQuery}`);
       const data = await res.json();
       if (data.posts) {
-        setPosts(data.posts);
         cachedFeedPosts[cacheKey] = data.posts;
+        if (tabToFetch === activeTab && tagToFetch === selectedTag) {
+          setPosts(data.posts);
+        }
       }
     } finally {
       setLoading(false);
     }
   }, [activeTab, selectedTag]);
 
-  // Fetch user & trending tags once on mount
+  const handleTabChange = (tab: "latest" | "questions") => {
+    if (tab === activeTab) return;
+    setActiveTab(tab);
+    const key = `${tab}:${selectedTag || ""}`;
+    if (cachedFeedPosts[key]) {
+      // 0ms instant display from cache
+      setPosts(cachedFeedPosts[key]);
+      setLoading(false);
+    }
+  };
+
+  // Fetch user, trending tags, and pre-warm alternate tab on mount
   useEffect(() => {
     fetch("/api/profiles/me")
       .then((res) => res.json())
@@ -71,6 +84,16 @@ export default function FeedPage() {
     });
 
     fetchTrendingTags();
+
+    // Pre-warm the alternate feed in background for instantaneous switching
+    fetch("/api/posts?tab=questions")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.posts) {
+          cachedFeedPosts["questions:"] = data.posts;
+        }
+      })
+      .catch(() => {});
   }, [fetchTrendingTags]);
 
   // Fetch posts when tab or tag filter changes
@@ -79,7 +102,20 @@ export default function FeedPage() {
   }, [fetchPosts]);
 
   const handlePostCreated = () => {
+    cachedFeedPosts = {};
     fetchPosts();
+    fetchTrendingTags();
+  };
+
+  const handlePostDeleted = (deletedId: string) => {
+    setPosts((prev) => prev.filter((p) => p.id !== deletedId));
+    // Clean deleted post out of all cached tabs
+    for (const key of Object.keys(cachedFeedPosts)) {
+      if (Array.isArray(cachedFeedPosts[key])) {
+        cachedFeedPosts[key] = cachedFeedPosts[key].filter((p) => p.id !== deletedId);
+      }
+    }
+    // Immediately refresh trending hashtags
     fetchTrendingTags();
   };
 
@@ -114,7 +150,7 @@ export default function FeedPage() {
             <div className="flex items-center justify-between mb-2.5 sm:mb-4 pb-1.5 sm:pb-2 border-b border-border">
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <button
-                  onClick={() => setActiveTab("latest")}
+                  onClick={() => handleTabChange("latest")}
                   className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                     activeTab === "latest"
                       ? "bg-primary text-primary-foreground shadow-sm"
@@ -124,7 +160,7 @@ export default function FeedPage() {
                   Latest Feed
                 </button>
                 <button
-                  onClick={() => setActiveTab("questions")}
+                  onClick={() => handleTabChange("questions")}
                   className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center gap-1 sm:gap-1.5 cursor-pointer ${
                     activeTab === "questions"
                       ? "bg-primary text-primary-foreground shadow-sm"
@@ -209,7 +245,7 @@ export default function FeedPage() {
                   post={post}
                   currentUserId={currentUser?.id}
                   currentUsername={currentUser?.username}
-                  onPostDeleted={(deletedId) => setPosts((prev) => prev.filter((p) => p.id !== deletedId))}
+                  onPostDeleted={handlePostDeleted}
                 />
               ))
             )}

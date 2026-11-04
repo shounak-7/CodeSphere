@@ -43,13 +43,11 @@ export function AppShell({
     <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
       <Navbar onToggleSidebar={() => setSidebarOpen((prev) => !prev)} />
       <div className="flex-1 flex overflow-hidden relative">
-        {(showSidebar || sidebarOpen) && (
-          <Sidebar
-            isOpen={sidebarOpen}
-            onClose={() => setSidebarOpen(false)}
-            isDesktopHidden={!showSidebar}
-          />
-        )}
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          isDesktopHidden={!showSidebar}
+        />
         <main
           className={cn(
             "flex-1 overflow-y-auto overflow-x-hidden min-w-0",

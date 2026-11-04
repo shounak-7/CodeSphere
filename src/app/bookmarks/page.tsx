@@ -74,20 +74,25 @@ interface BookmarkItem {
   collection?: EnrichedCollection | null;
 }
 
+let cachedBookmarks: BookmarkItem[] | null = null;
+
 export default function BookmarksPage() {
-  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [bookmarks, setBookmarks] = useState<BookmarkItem[]>(() => cachedBookmarks || []);
+  const [loading, setLoading] = useState(() => !cachedBookmarks);
   const [filterType, setFilterType] = useState<"all" | "post" | "program" | "collection">("all");
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [importingPostId, setImportingPostId] = useState<string | null>(null);
 
   const fetchBookmarks = async () => {
-    setLoading(true);
+    if (!cachedBookmarks) {
+      setLoading(true);
+    }
     try {
       const res = await fetch("/api/bookmarks");
       const data = await res.json();
       if (Array.isArray(data.bookmarks)) {
         setBookmarks(data.bookmarks);
+        cachedBookmarks = data.bookmarks;
       }
     } finally {
       setLoading(false);
@@ -108,6 +113,9 @@ export default function BookmarksPage() {
       });
       if (res.ok) {
         setBookmarks((prev) => prev.filter((b) => b.target_id !== targetId));
+        if (cachedBookmarks) {
+          cachedBookmarks = cachedBookmarks.filter((b) => b.target_id !== targetId);
+        }
         useToastStore.getState().addToast("Bookmark removed", "info");
       }
     } finally {

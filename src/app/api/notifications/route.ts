@@ -5,6 +5,7 @@ import {
   markAllLocalNotificationsRead,
   deleteLocalNotification,
   clearLocalNotifications,
+  getLocalNotifications,
 } from "@/lib/storage/communityStore";
 
 async function resolveCurrentUser() {
@@ -45,12 +46,63 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(50);
 
-    if (!error && notifications) {
-      return NextResponse.json({ notifications });
+    if (!error && notifications && notifications.length > 0) {
+      // Collect post ids and comment post ids to enrich notifications
+      const postIds = Array.from(new Set(notifications.map((n) => n.reference_id).filter(Boolean)));
+      const commentNotifs = notifications.filter((n) => n.notification_type === "comment");
+      const commentPostIds = Array.from(new Set(commentNotifs.map((n) => n.reference_id).filter(Boolean)));
+
+      const [postsRes, commentsRes] = await Promise.all([
+        postIds.length > 0
+          ? supabase.from("posts").select("id, title, content").in("id", postIds)
+          : Promise.resolve({ data: [] }),
+        commentPostIds.length > 0
+          ? supabase.from("comments").select("id, post_id, author_id, content, created_at").in("post_id", commentPostIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const postMap = new Map((postsRes.data || []).map((p: any) => [p.id, p]));
+      const allComments: any[] = commentsRes.data || [];
+
+      const enriched = notifications.map((n) => {
+        const post = n.reference_id ? postMap.get(n.reference_id) : null;
+        let postTitle = post ? (post.title || (post.content ? post.content.slice(0, 40) : "")) : undefined;
+        let commentText = undefined;
+
+        if (n.notification_type === "comment" && n.reference_id) {
+          // Find matching comment by author and post
+          const matches = allComments.filter(
+            (c) => c.post_id === n.reference_id && (n.actor_id ? c.author_id === n.actor_id : true)
+          );
+          if (matches.length > 0) {
+            // Sort by closest creation time to the notification
+            const notifTime = new Date(n.created_at).getTime();
+            matches.sort((a, b) => {
+              const diffA = Math.abs(new Date(a.created_at).getTime() - notifTime);
+              const diffB = Math.abs(new Date(b.created_at).getTime() - notifTime);
+              return diffA - diffB;
+            });
+            commentText = matches[0].content;
+          }
+        }
+
+        return {
+          ...n,
+          post_title: postTitle,
+          comment_text: commentText,
+        };
+      });
+
+      return NextResponse.json({ notifications: enriched });
     }
   } catch (err) {
     console.warn("Supabase notifications fetch error:", err);
   }
+
+  try {
+    const local = await getLocalNotifications(userId, username || undefined);
+    return NextResponse.json({ notifications: local });
+  } catch {}
 
   return NextResponse.json({ notifications: [] });
 }
@@ -98,9 +150,7 @@ export async function DELETE(request: Request) {
         await clearLocalNotifications(userId, username || undefined);
       } catch {}
       return NextResponse.json({ success: true, cleared: true });
-    }
-
-    if (id) {
+    } else if (id) {
       await admin.from("notifications").delete().eq("id", id).eq("recipient_id", userId);
       try {
         await deleteLocalNotification(id, userId, username || undefined);
@@ -111,5 +161,5 @@ export async function DELETE(request: Request) {
     console.warn("Supabase delete notification error:", err);
   }
 
-  return NextResponse.json({ error: "Missing notification id or all flag" }, { status: 400 });
+  return NextResponse.json({ error: "Notification not found" }, { status: 404 });
 }

@@ -25,60 +25,65 @@ export async function GET(request: Request) {
         .order("created_at", { ascending: false });
 
       if (!error && rawBookmarks) {
-        // Enrich bookmarks with their target entity details
-        const enriched = await Promise.all(
-          rawBookmarks.map(async (b) => {
-            let post = null;
-            let program = null;
-            let collection = null;
+        if (rawBookmarks.length === 0) {
+          return NextResponse.json({ bookmarks: [] });
+        }
 
-            if (b.target_type === "post") {
-              const { data: p } = await supabase
+        // Fast parallel batch enrichment: 3 batch queries instead of N+1 individual roundtrips
+        const postIds = rawBookmarks.filter((b) => b.target_type === "post").map((b) => b.target_id);
+        const progIds = rawBookmarks.filter((b) => b.target_type === "program").map((b) => b.target_id);
+        const colIds = rawBookmarks.filter((b) => b.target_type === "collection").map((b) => b.target_id);
+
+        const [postsRes, progsRes, colsRes] = await Promise.all([
+          postIds.length > 0
+            ? supabase
                 .from("posts")
                 .select(
                   `*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url), comments(id), post_likes(user_id)`
                 )
-                .eq("id", b.target_id)
-                .maybeSingle();
-
-              if (p) {
-                const isLiked = user ? p.post_likes?.some((l: { user_id: string }) => l.user_id === user.id) : false;
-                const likesCount = p.post_likes?.length || p.likes_count || 0;
-                const commentsCount = typeof p.comments?.length === "number" ? p.comments.length : (p.comments_count || 0);
-                post = {
-                  ...p,
-                  is_liked: isLiked,
-                  is_bookmarked: true,
-                  likes_count: likesCount,
-                  comments_count: commentsCount,
-                };
-              } else {
-                post = null;
-              }
-            } else if (b.target_type === "program") {
-              const { data: prog } = await supabase
+                .in("id", postIds)
+            : Promise.resolve({ data: [] }),
+          progIds.length > 0
+            ? supabase
                 .from("programs")
                 .select("id, title, description, source_code, category, updated_at")
-                .eq("id", b.target_id)
-                .maybeSingle();
-              program = prog;
-            } else if (b.target_type === "collection") {
-              const { data: col } = await supabase
+                .in("id", progIds)
+            : Promise.resolve({ data: [] }),
+          colIds.length > 0
+            ? supabase
                 .from("collections")
                 .select("id, title, description, created_at")
-                .eq("id", b.target_id)
-                .maybeSingle();
-              collection = col;
-            }
+                .in("id", colIds)
+            : Promise.resolve({ data: [] }),
+        ]);
 
-            return {
-              ...b,
-              post,
-              program,
-              collection,
-            };
+        const postsMap = new Map(
+          (postsRes.data || []).map((p: any) => {
+            const isLiked = user ? p.post_likes?.some((l: { user_id: string }) => l.user_id === user.id) : false;
+            const likesCount = p.post_likes?.length || p.likes_count || 0;
+            const commentsCount = typeof p.comments?.length === "number" ? p.comments.length : (p.comments_count || 0);
+            return [
+              p.id,
+              {
+                ...p,
+                is_liked: isLiked,
+                is_bookmarked: true,
+                likes_count: likesCount,
+                comments_count: commentsCount,
+              },
+            ];
           })
         );
+
+        const progsMap = new Map((progsRes.data || []).map((pr: any) => [pr.id, pr]));
+        const colsMap = new Map((colsRes.data || []).map((c: any) => [c.id, c]));
+
+        const enriched = rawBookmarks.map((b) => ({
+          ...b,
+          post: b.target_type === "post" ? postsMap.get(b.target_id) || null : null,
+          program: b.target_type === "program" ? progsMap.get(b.target_id) || null : null,
+          collection: b.target_type === "collection" ? colsMap.get(b.target_id) || null : null,
+        }));
 
         return NextResponse.json({ bookmarks: enriched });
       }

@@ -372,10 +372,23 @@ export default function NotificationsPage() {
 
                         {n.notification_type === "comment" && (
                           <span className="text-muted-foreground">
-                            commented:{" "}
-                            <span className="font-semibold text-primary">
-                              &quot;{n.comment_text || "Great solution!"}&quot;
-                            </span>
+                            {n.comment_text ? (
+                              <>
+                                commented:{" "}
+                                <span className="font-semibold text-primary">
+                                  &quot;{n.comment_text}&quot;
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                commented on your C post{" "}
+                                {n.post_title && (
+                                  <span className="font-semibold text-foreground italic">
+                                    &quot;{n.post_title}&quot;
+                                  </span>
+                                )}
+                              </>
+                            )}
                           </span>
                         )}
 
