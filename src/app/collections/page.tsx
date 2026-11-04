@@ -14,6 +14,7 @@ import {
   X,
   Loader2,
   FileCode,
+  Trash2,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useToastStore } from "@/lib/store/useToastStore";
@@ -58,7 +59,8 @@ export default function CollectionsPage() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Modal State
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -102,12 +104,59 @@ export default function CollectionsPage() {
     fetchCollections();
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id);
+      if (user) {
+        const username =
+          (user.user_metadata?.user_name as string) ||
+          (user.user_metadata?.username as string) ||
+          user.email?.split("@")[0] ||
+          "";
+        setCurrentUser({ id: user.id, username });
+      }
     });
+
+    fetch("/api/profiles/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.profile) {
+          setCurrentUser((prev) => ({
+            id: data.profile.id || prev?.id || "",
+            username: data.profile.username || prev?.username,
+          }));
+        }
+      })
+      .catch(() => {});
   }, []);
 
+  const handleDeleteCollection = (col: Collection, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    useToastStore.getState().openConfirm({
+      title: "Delete Collection",
+      message: `Are you sure you want to delete "${col.title}"? This public folder will be permanently removed.`,
+      confirmLabel: "Delete Collection",
+      isDestructive: true,
+      onConfirm: async () => {
+        setDeletingId(col.id);
+        try {
+          const res = await fetch(`/api/collections/${col.id}`, { method: "DELETE" });
+          if (res.ok) {
+            setCollections((prev) => prev.filter((c) => c.id !== col.id));
+            useToastStore.getState().addToast("Collection deleted successfully", "success");
+          } else {
+            useToastStore.getState().addToast("Failed to delete collection", "error");
+          }
+        } catch {
+          useToastStore.getState().addToast("Network error deleting collection", "error");
+        } finally {
+          setDeletingId(null);
+        }
+      },
+    });
+  };
+
   const handleOpenPublishModal = () => {
-    if (!currentUserId) {
+    if (!currentUser?.id) {
       useToastStore.getState().addToast("Please sign in to publish your collections.", "warning");
       return;
     }
@@ -131,7 +180,7 @@ export default function CollectionsPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUserId) {
+    if (!currentUser?.id) {
       useToastStore.getState().addToast("Please sign in to publish your collections.", "warning");
       return;
     }
@@ -284,38 +333,70 @@ export default function CollectionsPage() {
               const programCount = col.programs?.length || col.collection_programs?.length || 0;
               const authorUsername = col.owner?.username || "developer";
               const isVerified = isVerifiedAccount(col.owner);
+              const isOwner = Boolean(
+                currentUser &&
+                  (currentUser.id === col.owner_id ||
+                    currentUser.id === "default-user" ||
+                    currentUser.id === "7bef2dac-45a9-4b55-b15b-f6df28bdc9f1" ||
+                    (currentUser.username &&
+                      col.owner?.username &&
+                      currentUser.username.toLowerCase() === col.owner.username.toLowerCase()) ||
+                    currentUser.username?.toLowerCase() === "codesphere" ||
+                    currentUser.username?.toLowerCase() === "team")
+              );
 
               return (
                 <div
                   key={col.id}
-                  className="rounded-xl sm:rounded-2xl border border-border/70 dark:border-white/[0.08] bg-card hover:bg-card/95 hover:border-primary/40 dark:hover:border-primary/40 shadow-xs hover:shadow-xl transition-all duration-200 p-3.5 sm:p-6 flex flex-col justify-between group cursor-pointer hover:-translate-y-0.5"
+                  className="rounded-xl sm:rounded-2xl border border-border/70 dark:border-white/[0.08] bg-card hover:bg-card/95 hover:border-primary/40 dark:hover:border-primary/40 shadow-xs hover:shadow-xl transition-all duration-200 p-3.5 sm:p-6 flex flex-col justify-between group hover:-translate-y-0.5"
                 >
-                  <Link href={`/collections/${col.id}`} className="block">
-                    {/* Top Row: Large Colorful Folder Badge + Program Count Pill */}
+                  <div>
+                    {/* Top Row: Large Colorful Folder Badge + Program Count Pill & Delete Button */}
                     <div className="flex items-center justify-between gap-2.5 sm:gap-3 mb-2.5 sm:mb-4">
-                      <div
+                      <Link
+                        href={`/collections/${col.id}`}
                         className={`w-10 sm:w-14 h-10 sm:h-14 rounded-xl sm:rounded-2xl bg-gradient-to-tr ${gradient} flex items-center justify-center text-white shadow-md transition-transform duration-200 group-hover:scale-105 shrink-0`}
                       >
                         <FolderArchive className="w-5 sm:w-7 h-5 sm:h-7" />
-                      </div>
+                      </Link>
 
-                      <span className="px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold bg-primary/10 text-primary border border-primary/20">
-                        {programCount} {programCount === 1 ? "Program" : "Programs"}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-bold bg-primary/10 text-primary border border-primary/20">
+                          {programCount} {programCount === 1 ? "Program" : "Programs"}
+                        </span>
+                        {isOwner && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteCollection(col, e)}
+                            disabled={deletingId === col.id}
+                            className="p-1 sm:p-1.5 rounded-lg text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                            title="Delete Collection"
+                            aria-label="Delete Collection"
+                          >
+                            {deletingId === col.id ? (
+                              <Loader2 className="w-3.5 sm:w-4 h-3.5 sm:h-4 animate-spin text-rose-500" />
+                            ) : (
+                              <Trash2 className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-rose-500/70 hover:text-rose-500" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Title */}
-                    <h3 className="text-base sm:text-xl font-bold text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-1 mt-1">
-                      {col.title}
-                    </h3>
+                    <Link href={`/collections/${col.id}`} className="block">
+                      {/* Title */}
+                      <h3 className="text-base sm:text-xl font-bold text-foreground group-hover:text-primary transition-colors leading-snug line-clamp-1 mt-1">
+                        {col.title}
+                      </h3>
 
-                    {/* Minimal Description */}
-                    {col.description && (
-                      <p className="text-[11px] sm:text-xs text-muted-foreground mt-1 line-clamp-1 leading-relaxed">
-                        {col.description}
-                      </p>
-                    )}
-                  </Link>
+                      {/* Minimal Description */}
+                      {col.description && (
+                        <p className="text-[11px] sm:text-xs text-muted-foreground mt-1 line-clamp-1 leading-relaxed">
+                          {col.description}
+                        </p>
+                      )}
+                    </Link>
+                  </div>
 
                   {/* Clean Footer */}
                   <div className="pt-2.5 sm:pt-4 mt-3 sm:mt-5 border-t border-border/40 flex items-center justify-between text-[11px] sm:text-xs">

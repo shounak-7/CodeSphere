@@ -147,6 +147,7 @@ interface CommunityDB {
   profiles: StoredProfile[];
   notifications: StoredNotification[];
   collections?: StoredCollection[];
+  deleted_collection_ids?: string[];
   verified_usernames?: string[];
 }
 
@@ -314,6 +315,10 @@ async function ensureDB(): Promise<CommunityDB> {
       ])
     );
 
+    const deletedCollectionIds = new Set(parsed.deleted_collection_ids || []);
+    const rawCollections = Array.isArray(parsed.collections) ? parsed.collections : SEED_COLLECTIONS;
+    const collections = rawCollections.filter((c) => !deletedCollectionIds.has(c.id));
+
     return {
       posts: parsed.posts || SEED_POSTS,
       comments: parsed.comments || [],
@@ -322,7 +327,8 @@ async function ensureDB(): Promise<CommunityDB> {
       bookmarks: parsed.bookmarks || [],
       profiles,
       notifications: parsed.notifications || SEED_NOTIFICATIONS,
-      collections: parsed.collections && parsed.collections.length > 0 ? parsed.collections : SEED_COLLECTIONS,
+      collections,
+      deleted_collection_ids: parsed.deleted_collection_ids || [],
       verified_usernames: verifiedUsernames,
     };
   } catch {
@@ -1275,7 +1281,9 @@ export async function getLocalProfileData(
   }
 
   // Fetch collections by this user
-  const userCollections = (db.collections || SEED_COLLECTIONS)
+  const deletedCollectionIds = new Set(db.deleted_collection_ids || []);
+  const userCollections = (Array.isArray(db.collections) ? db.collections : SEED_COLLECTIONS)
+    .filter((c) => !deletedCollectionIds.has(c.id))
     .filter((c) => {
       const belongs =
         c.owner_id === targetId ||
@@ -1587,7 +1595,10 @@ export async function removeLocalFollower(
 
 export async function getLocalCollections(tag?: string): Promise<any[]> {
   const db = await ensureDB();
-  let collections = db.collections || SEED_COLLECTIONS;
+  const deletedIds = new Set(db.deleted_collection_ids || []);
+  let collections = (Array.isArray(db.collections) ? db.collections : SEED_COLLECTIONS).filter(
+    (c) => !deletedIds.has(c.id)
+  );
 
   // Filter for public visibility
   collections = collections.filter((c) => c.visibility === "public");
@@ -1621,7 +1632,12 @@ export async function getLocalCollections(tag?: string): Promise<any[]> {
 
 export async function getLocalCollectionById(id: string): Promise<StoredCollection | null> {
   const db = await ensureDB();
-  const collections = db.collections || SEED_COLLECTIONS;
+  const deletedIds = new Set(db.deleted_collection_ids || []);
+  if (deletedIds.has(id)) return null;
+
+  const collections = (Array.isArray(db.collections) ? db.collections : SEED_COLLECTIONS).filter(
+    (c) => !deletedIds.has(c.id)
+  );
   const found = collections.find((c) => c.id === id);
   if (!found) return null;
   const ownerUsername = found.owner?.username || "";
@@ -1674,20 +1690,37 @@ export async function saveLocalCollection(data: {
   return newCollection;
 }
 
-export async function deleteLocalCollection(id: string, userId?: string): Promise<boolean> {
+export async function deleteLocalCollection(
+  id: string,
+  userId?: string,
+  username?: string
+): Promise<boolean> {
   const db = await ensureDB();
-  if (!db.collections) return false;
+  if (!db.collections) db.collections = [];
+  if (!db.deleted_collection_ids) db.deleted_collection_ids = [];
+
+  const cleanUser = username?.toLowerCase();
+  const isTeam = cleanUser === "codesphere" || cleanUser === "team";
 
   const initialLength = db.collections.length;
   db.collections = db.collections.filter((c) => {
     if (c.id !== id) return true;
-    if (userId && c.owner_id !== userId && c.owner_id !== "default-user") return true;
+    const ownerMatches =
+      !userId ||
+      c.owner_id === userId ||
+      c.owner_id === "default-user" ||
+      c.owner_id === "7bef2dac-45a9-4b55-b15b-f6df28bdc9f1" ||
+      (cleanUser && c.owner?.username && c.owner.username.toLowerCase() === cleanUser) ||
+      isTeam;
+
+    if (!ownerMatches) return true;
     return false;
   });
 
-  if (db.collections.length < initialLength) {
-    await saveDB(db);
-    return true;
+  const removed = db.collections.length < initialLength;
+  if (!db.deleted_collection_ids.includes(id)) {
+    db.deleted_collection_ids.push(id);
   }
-  return false;
+  await saveDB(db);
+  return removed || true;
 }

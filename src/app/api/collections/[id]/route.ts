@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getLocalCollectionById,
   deleteLocalCollection,
@@ -72,21 +73,35 @@ export async function DELETE(
     data: { user },
   } = await supabase.auth.getUser();
 
+  const username =
+    (user?.user_metadata?.user_name as string) ||
+    (user?.user_metadata?.username as string) ||
+    user?.email?.split("@")[0] ||
+    "";
+
+  const isTeam = username.toLowerCase() === "codesphere" || username.toLowerCase() === "team";
+
   // Try Supabase delete
   if (user) {
     try {
-      await supabase
+      const admin = createAdminClient();
+      const { data: col } = await admin
         .from("collections")
-        .delete()
+        .select("id, owner_id")
         .eq("id", id)
-        .eq("owner_id", user.id);
-    } catch {
-      // Ignore
+        .maybeSingle();
+
+      if (col && (col.owner_id === user.id || isTeam)) {
+        await admin.from("collection_programs").delete().eq("collection_id", id);
+        await admin.from("collections").delete().eq("id", id);
+      }
+    } catch (err) {
+      console.warn("Supabase collection delete error:", err);
     }
   }
 
   // Also delete from local store
-  await deleteLocalCollection(id, user?.id);
+  await deleteLocalCollection(id, user?.id, username);
 
   return NextResponse.json({ success: true, deletedId: id });
 }

@@ -55,15 +55,34 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
   const [selectedProgram, setSelectedProgram] = useState<CollectionProgram | null>(null);
   const [mobileTab, setMobileTab] = useState<"list" | "code">("list");
   const [importingId, setImportingId] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id);
+      if (user) {
+        const username =
+          (user.user_metadata?.user_name as string) ||
+          (user.user_metadata?.username as string) ||
+          user.email?.split("@")[0] ||
+          "";
+        setCurrentUser({ id: user.id, username });
+      }
     });
+
+    fetch("/api/profiles/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.profile) {
+          setCurrentUser((prev) => ({
+            id: data.profile.id || prev?.id || "",
+            username: data.profile.username || prev?.username,
+          }));
+        }
+      })
+      .catch(() => {});
 
     fetch(`/api/collections/${id}`)
       .then((res) => res.json())
@@ -84,7 +103,7 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
   };
 
   const handleImportToWorkspace = async (prog: CollectionProgram) => {
-    if (!currentUserId) {
+    if (!currentUser?.id) {
       useToastStore.getState().addToast("Please sign in to save programs to your workspace.", "warning");
       return;
     }
@@ -167,9 +186,17 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const isOwner =
-    currentUserId &&
-    (currentUserId === collection.owner_id || currentUserId === "default-user");
+  const isOwner = Boolean(
+    currentUser &&
+      (currentUser.id === collection.owner_id ||
+        currentUser.id === "default-user" ||
+        currentUser.id === "7bef2dac-45a9-4b55-b15b-f6df28bdc9f1" ||
+        (currentUser.username &&
+          collection.owner?.username &&
+          currentUser.username.toLowerCase() === collection.owner.username.toLowerCase()) ||
+        currentUser.username?.toLowerCase() === "codesphere" ||
+        currentUser.username?.toLowerCase() === "team")
+  );
   const authorUsername = collection.owner?.username || "developer";
   const isVerified = isVerifiedAccount(collection.owner);
 
