@@ -86,6 +86,11 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     }
   };
 
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   const notifyUserOfEvent = (notification: {
     notification_type: string;
     actor?: { username?: string; full_name?: string };
@@ -104,6 +109,8 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
   };
 
   const fetchNotifications = async () => {
+    if (typeof document !== "undefined" && document.hidden) return;
+    if (!userRef.current) return;
     try {
       const res = await fetch("/api/notifications");
       const data = await res.json();
@@ -244,16 +251,24 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible" && userRef.current) {
+        fetchNotifications();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     document.addEventListener("mousedown", handleClickOutside);
     document.addEventListener("keydown", handleKeyDown);
 
-    // Periodic fallback poll (8s ensures prompt updates even on network drops)
-    const interval = setInterval(fetchNotifications, 8000);
+    // Dynamic background poll: 15s ensures timely updates without battery or network drain
+    const interval = setInterval(fetchNotifications, 15000);
 
     return () => {
       authSub?.unsubscribe();
       window.removeEventListener("profile-updated", handleProfileUpdated);
       window.removeEventListener("notifications-updated", handleNotifUpdated);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
       clearInterval(interval);

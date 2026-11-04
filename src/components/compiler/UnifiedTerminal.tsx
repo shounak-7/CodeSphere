@@ -78,7 +78,11 @@ export function UnifiedTerminal({
   // Auto-scroll terminal stream directly to bottom without disruptive smooth-scroll animations
   useEffect(() => {
     if (!isCollapsed && (activeTab === "terminal" || activeTab === "output") && terminalScrollRef.current) {
-      terminalScrollRef.current.scrollTop = terminalScrollRef.current.scrollHeight;
+      const el = terminalScrollRef.current;
+      const raf = requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+      });
+      return () => cancelAnimationFrame(raf);
     }
   }, [stdout, stderr, terminalEntries, isCollapsed, activeTab]);
 
@@ -170,14 +174,19 @@ export function UnifiedTerminal({
     setIsDragging(true);
     startDragYRef.current = e.clientY;
     startHeightRef.current = typeof height === "number" ? height : 260;
+    let rafId: number | null = null;
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       const deltaY = startDragYRef.current - moveEvent.clientY;
       const nextHeight = Math.min(Math.max(130, startHeightRef.current + deltaY), window.innerHeight - 140);
-      onHeightChange?.(nextHeight);
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        onHeightChange?.(nextHeight);
+      });
     };
 
     const onMouseUp = () => {
+      if (rafId) cancelAnimationFrame(rafId);
       setIsDragging(false);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
@@ -277,9 +286,9 @@ export function UnifiedTerminal({
   return (
     <div
       style={{ height: effectiveHeight }}
-      className={`relative flex flex-col bg-[#f8fafc] dark:bg-[#070b14] text-slate-900 dark:text-slate-100 font-mono text-xs border-t border-slate-200/90 dark:border-white/[0.08] overflow-hidden select-text transition-[height] duration-75 shadow-xs ${
-        isMaximized ? "absolute inset-0 z-30 h-full" : ""
-      }`}
+      className={`relative flex flex-col bg-[#f8fafc] dark:bg-[#070b14] text-slate-900 dark:text-slate-100 font-mono text-xs border-t border-slate-200/90 dark:border-white/[0.08] overflow-hidden select-text shadow-xs ${
+        isDragging ? "transition-none select-none" : "transition-[height] duration-75"
+      } ${isMaximized ? "absolute inset-0 z-30 h-full" : ""}`}
     >
       {/* Draggable Top Resize Handle */}
       {!isMaximized && typeof height === "number" && (

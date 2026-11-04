@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import dynamic from "next/dynamic";
 import { useThemeStore } from "@/lib/store/useThemeStore";
 import { Loader2 } from "lucide-react";
@@ -25,7 +25,7 @@ interface CodeEditorProps {
   wordWrap?: "on" | "off" | "wordWrapColumn" | "bounded";
 }
 
-export function CodeEditor({
+function CodeEditorComponent({
   code,
   onChange,
   language = "c",
@@ -140,3 +140,5 @@ export function CodeEditor({
     </div>
   );
 }
+
+export const CodeEditor = memo(CodeEditorComponent);

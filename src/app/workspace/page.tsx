@@ -73,6 +73,7 @@ export default function WorkspacePage() {
   const [openProgramIds, setOpenProgramIds] = useState<string[]>([]);
   const [isExplorerOpen, setIsExplorerOpen] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(250);
+  const [isDraggingExplorer, setIsDraggingExplorer] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(260);
   const [batchStdin, setBatchStdin] = useState("");
   const [mobileView, setMobileView] = useState<"files" | "editor" | "terminal">("editor");
@@ -220,16 +221,23 @@ export default function WorkspacePage() {
   // Explorer horizontal resize dragging
   const handleExplorerMouseDownResize = (e: React.MouseEvent) => {
     e.preventDefault();
+    setIsDraggingExplorer(true);
     explorerDragRef.current = { startX: e.clientX, startW: explorerWidth };
+    let rafId: number | null = null;
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       if (!explorerDragRef.current) return;
       const deltaX = moveEvent.clientX - explorerDragRef.current.startX;
       const nextWidth = Math.min(Math.max(180, explorerDragRef.current.startW + deltaX), 450);
-      setExplorerWidth(nextWidth);
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        setExplorerWidth(nextWidth);
+      });
     };
 
     const onMouseUp = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      setIsDraggingExplorer(false);
       explorerDragRef.current = null;
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
@@ -745,7 +753,9 @@ export default function WorkspacePage() {
         {isExplorerOpen && (
           <aside
             style={{ width: `${explorerWidth}px` }}
-            className="hidden lg:flex h-full flex-col border-r border-slate-200/70 dark:border-white/[0.08] bg-card/95 backdrop-blur-2xl shadow-none flex-shrink-0 z-10 transition-[width] duration-75 relative"
+            className={`hidden lg:flex h-full flex-col border-r border-slate-200/70 dark:border-white/[0.08] bg-card/95 backdrop-blur-2xl shadow-none flex-shrink-0 z-10 relative ${
+              isDraggingExplorer ? "transition-none select-none" : "transition-[width] duration-75"
+            }`}
           >
             {/* Explorer Header */}
             <div className="h-10 px-3 border-b border-border/70 flex items-center justify-between flex-shrink-0 bg-secondary/20">

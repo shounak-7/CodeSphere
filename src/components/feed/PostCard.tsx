@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import Link from "next/link";
 import {
   Heart,
@@ -64,7 +64,7 @@ interface PostCardProps {
   onPostDeleted?: (id: string) => void;
 }
 
-export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }: PostCardProps) {
+function PostCardComponent({ post, currentUserId, currentUsername, onPostDeleted }: PostCardProps) {
   const [liked, setLiked] = useState(Boolean(post.is_liked));
   const [likesCount, setLikesCount] = useState(typeof post.likes_count === "number" ? post.likes_count : 0);
   const [bookmarked, setBookmarked] = useState(Boolean(post.is_bookmarked));
@@ -555,3 +555,5 @@ export function PostCard({ post, currentUserId, currentUsername, onPostDeleted }
     </article>
   );
 }
+
+export const PostCard = memo(PostCardComponent);
