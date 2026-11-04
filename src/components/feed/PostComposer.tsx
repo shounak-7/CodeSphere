@@ -35,7 +35,7 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
           </div>
         </div>
         <Link
-          href="/login"
+          href="/login?redirectTo=/feed&force=true"
           className="shrink-0 inline-flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold shadow-md shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
         >
           <LogIn className="w-3.5 h-3.5" />

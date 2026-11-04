@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteLocalComment } from "@/lib/storage/communityStore";
 
 export async function DELETE(
@@ -27,14 +28,38 @@ export async function DELETE(
 
   let deletedFromSupabase = false;
   try {
-    const { data, error } = await supabase
+    const { data: existingComment } = await supabase
       .from("comments")
-      .delete()
+      .select("id, post_id")
       .eq("id", id)
       .eq("author_id", userId)
-      .select("id");
-    if (!error && data && data.length > 0) {
-      deletedFromSupabase = true;
+      .maybeSingle();
+
+    if (existingComment) {
+      const { error } = await supabase
+        .from("comments")
+        .delete()
+        .eq("id", id)
+        .eq("author_id", userId);
+
+      if (!error) {
+        deletedFromSupabase = true;
+
+        try {
+          const admin = createAdminClient();
+          const { count: exactCount } = await admin
+            .from("comments")
+            .select("id", { count: "exact", head: true })
+            .eq("post_id", existingComment.post_id);
+
+          await admin
+            .from("posts")
+            .update({ comments_count: exactCount || 0 })
+            .eq("id", existingComment.post_id);
+        } catch (countErr) {
+          console.warn("Could not sync comments_count on delete:", countErr);
+        }
+      }
     }
   } catch (err) {
     console.warn("Supabase comment delete error, proceeding with local check:", err);

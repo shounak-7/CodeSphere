@@ -36,11 +36,25 @@ export async function GET(request: Request) {
               const { data: p } = await supabase
                 .from("posts")
                 .select(
-                  `*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`
+                  `*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url), comments(id), post_likes(user_id)`
                 )
                 .eq("id", b.target_id)
                 .maybeSingle();
-              post = p;
+
+              if (p) {
+                const isLiked = user ? p.post_likes?.some((l: { user_id: string }) => l.user_id === user.id) : false;
+                const likesCount = p.post_likes?.length || p.likes_count || 0;
+                const commentsCount = typeof p.comments?.length === "number" ? p.comments.length : (p.comments_count || 0);
+                post = {
+                  ...p,
+                  is_liked: isLiked,
+                  is_bookmarked: true,
+                  likes_count: likesCount,
+                  comments_count: commentsCount,
+                };
+              } else {
+                post = null;
+              }
             } else if (b.target_type === "program") {
               const { data: prog } = await supabase
                 .from("programs")

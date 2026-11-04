@@ -68,10 +68,14 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Redirect logged in user from /login to /workspace
-    if (isLoginPath && user) {
+    // Redirect logged in user from /login to target only if not explicitly forced
+    const isForced = request.nextUrl.searchParams.get("force") === "true";
+    if (isLoginPath && user && !isForced) {
+      const redirectTo = request.nextUrl.searchParams.get("redirectTo");
+      const target = redirectTo && redirectTo !== "/login" ? redirectTo : "/workspace";
       const url = request.nextUrl.clone();
-      url.pathname = "/workspace";
+      url.pathname = target.startsWith("/") ? target : "/workspace";
+      url.search = "";
       return NextResponse.redirect(url);
     }
   } catch (err) {

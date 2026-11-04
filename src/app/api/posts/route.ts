@@ -31,7 +31,8 @@ export async function GET(request: Request) {
         `
         *,
         author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url),
-        post_likes(user_id)
+        post_likes(user_id),
+        comments(id)
       `
       )
       .order("created_at", { ascending: false })
@@ -70,11 +71,13 @@ export async function GET(request: Request) {
       const formattedPosts = posts.map((post) => {
         const isLiked = user ? post.post_likes?.some((l: { user_id: string }) => l.user_id === user.id) : false;
         const likesCount = post.post_likes?.length || post.likes_count || 0;
+        const commentsCount = typeof post.comments?.length === "number" ? post.comments.length : (post.comments_count || 0);
         return {
           ...post,
           is_liked: isLiked,
           is_bookmarked: bookmarkedIds.has(post.id),
           likes_count: likesCount,
+          comments_count: commentsCount,
         };
       });
 

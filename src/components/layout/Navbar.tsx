@@ -102,29 +102,72 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     const supabase = createClient();
     let channel: ReturnType<typeof supabase.channel> | null = null;
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setUser(user);
+    const setupUserSession = (currentUser: { id: string; email?: string; user_metadata?: Record<string, unknown> } | null) => {
+      if (currentUser) {
+        setUser(currentUser);
         fetchProfile();
         fetchNotifications();
 
-        // Subscribe to real-time notification events for this user
-        channel = supabase
-          .channel(`user-notifications-${user.id}`)
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "notifications",
-              filter: `recipient_id=eq.${user.id}`,
-            },
-            () => {
-              fetchNotifications();
-            }
-          )
-          .subscribe();
+        if (!channel) {
+          channel = supabase
+            .channel(`user-notifications-${currentUser.id}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "notifications",
+                filter: `recipient_id=eq.${currentUser.id}`,
+              },
+              () => {
+                fetchNotifications();
+              }
+            )
+            .subscribe();
+        }
+      } else {
+        setUser(null);
+        setProfile(null);
+        setNotifications([]);
+        setUnreadCount(0);
+        if (channel) {
+          supabase.removeChannel(channel);
+          channel = null;
+        }
       }
+    };
+
+    // 1. Check local session immediately
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setupUserSession(session.user);
+      }
+    }).catch(() => {});
+
+    // 2. Validate with getUser
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setupUserSession(user);
+      }
+    }).catch(() => {});
+
+    // 3. Fallback: check server profile directly via cookie
+    fetch("/api/profiles/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.profile) {
+          setProfile(data.profile);
+          setUser((prev) => prev || { id: data.profile.id, user_metadata: {} });
+          fetchNotifications();
+        }
+      })
+      .catch(() => {});
+
+    // 4. Subscribe to auth state changes (login, logout, token refresh)
+    const {
+      data: { subscription: authSub },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setupUserSession(session?.user ?? null);
     });
 
     const handleProfileUpdated = () => {
@@ -171,6 +214,7 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     const interval = setInterval(fetchNotifications, 60000);
 
     return () => {
+      authSub?.unsubscribe();
       window.removeEventListener("profile-updated", handleProfileUpdated);
       window.removeEventListener("notifications-updated", handleNotifUpdated);
       document.removeEventListener("mousedown", handleClickOutside);
@@ -192,11 +236,15 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
   }, [pathname, unreadCount]);
 
   const handleSignOut = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } catch {}
     setUser(null);
     setProfile(null);
-    router.push("/login");
+    setNotifications([]);
+    setUnreadCount(0);
+    window.location.href = "/login?force=true";
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -637,7 +685,7 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
             </div>
           ) : (
             <Link
-              href="/login"
+              href={`/login?redirectTo=${encodeURIComponent(pathname || "/workspace")}&force=true`}
               className="inline-flex items-center justify-center px-2.5 sm:px-4 py-1 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold text-white bg-primary hover:bg-primary/90 shadow-md shadow-primary/20 transition-all whitespace-nowrap shrink-0"
             >
               Sign In

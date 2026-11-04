@@ -38,15 +38,18 @@ function LoginContent() {
     setMounted(true);
   }, []);
 
-  // If already logged in, redirect straight to the feed
+  // If already logged in and not forced, redirect straight to target
   useEffect(() => {
+    const isForced = searchParams.get("force") === "true";
+    if (isForced) return;
+
     const supabase = createClient();
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
         router.push(redirectTo);
       }
     });
-  }, [redirectTo, router]);
+  }, [redirectTo, router, searchParams]);
 
   const toggleTheme = () => {
     const current = resolvedTheme || theme;

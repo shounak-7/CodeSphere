@@ -117,21 +117,31 @@ export async function POST(
         } else if (comment) {
           // Increment comments_count on post and notify author
           try {
-            const { data: currentPost } = await supabase
+            const admin = createAdminClient();
+            const { data: currentPost } = await admin
               .from("posts")
               .select("comments_count, author_id")
               .eq("id", postId)
               .single();
 
             if (currentPost) {
-              await supabase
+              const { count: exactCommentCount } = await admin
+                .from("comments")
+                .select("id", { count: "exact", head: true })
+                .eq("post_id", postId);
+
+              const newCount =
+                typeof exactCommentCount === "number"
+                  ? exactCommentCount
+                  : (currentPost.comments_count || 0) + 1;
+
+              await admin
                 .from("posts")
-                .update({ comments_count: (currentPost.comments_count || 0) + 1 })
+                .update({ comments_count: newCount })
                 .eq("id", postId);
 
               // Notify author if not commenting on own post
               if (currentPost.author_id !== user.id) {
-                const admin = createAdminClient();
                 await admin.from("notifications").insert({
                   recipient_id: currentPost.author_id,
                   actor_id: user.id,
