@@ -29,12 +29,13 @@ export async function GET(
   const targetUsername = username === "me" ? currentUsername || "codesphere" : username;
 
   try {
+    const admin = createAdminClient();
     // 1. Resolve target user's Supabase ID
     let targetProfileId: string | null = null;
     if (username === "me" && currentUserId) {
       targetProfileId = currentUserId;
     } else {
-      const { data: tp } = await supabase
+      const { data: tp } = await admin
         .from("profiles")
         .select("id")
         .ilike("username", targetUsername)
@@ -45,20 +46,20 @@ export async function GET(
     if (targetProfileId) {
       // 2. Fetch followers, following, and current user's following list in parallel
       const [followersRes, followingRes, myFollowingRes] = await Promise.all([
-        supabase
+        admin
           .from("follows")
           .select(`
             follower:profiles!follows_follower_id_fkey(id, username, full_name, avatar_url, bio)
           `)
           .eq("following_id", targetProfileId),
-        supabase
+        admin
           .from("follows")
           .select(`
             following:profiles!follows_following_id_fkey(id, username, full_name, avatar_url, bio)
           `)
           .eq("follower_id", targetProfileId),
         currentUserId
-          ? supabase
+          ? admin
               .from("follows")
               .select("following_id")
               .eq("follower_id", currentUserId)

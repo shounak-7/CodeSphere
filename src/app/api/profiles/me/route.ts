@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalProfileData, saveLocalProfile } from "@/lib/storage/communityStore";
 
 const UpdateProfileSchema = z.object({
@@ -23,42 +24,80 @@ export async function GET() {
   }
 
   const userId = user.id;
+  const admin = createAdminClient();
 
-  // 1. Fetch from Supabase profiles table first (single source of truth in cloud)
+  // 1. Fetch profile, counts, programs, posts, and collections in a single parallel roundtrip
   try {
-    const { data: supaProfile } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .maybeSingle();
+    const [
+      profileRes,
+      followersCountRes,
+      followingCountRes,
+      userProgramsRes,
+      userPostsRes,
+      userCollectionsRes,
+    ] = await Promise.all([
+      admin.from("profiles").select("*").eq("id", userId).maybeSingle(),
+      admin.from("follows").select("follower_id", { count: "exact" }).eq("following_id", userId),
+      admin.from("follows").select("following_id", { count: "exact" }).eq("follower_id", userId),
+      admin
+        .from("programs")
+        .select("id, title, description, category, language, visibility, created_at, updated_at")
+        .eq("owner_id", userId)
+        .order("updated_at", { ascending: false }),
+      admin
+        .from("posts")
+        .select("*, author:profiles!posts_author_id_fkey(*), post_likes(user_id), comments(id)")
+        .eq("author_id", userId)
+        .order("created_at", { ascending: false }),
+      admin
+        .from("collections")
+        .select("*, collection_programs(count)")
+        .eq("owner_id", userId)
+        .order("updated_at", { ascending: false }),
+    ]);
+
+    const supaProfile = profileRes.data;
 
     if (supaProfile) {
-      const [{ count: followersCount }, { count: followingCount }] = await Promise.all([
-        supabase.from("follows").select("follower_id", { count: "exact" }).eq("following_id", userId),
-        supabase.from("follows").select("following_id", { count: "exact" }).eq("follower_id", userId),
-      ]);
+      const followersCount = followersCountRes.count ?? (followersCountRes.data?.length || 0);
+      const followingCount = followingCountRes.count ?? (followingCountRes.data?.length || 0);
+      const programs = userProgramsRes.data || [];
+      const posts = (userPostsRes.data || []).map((p) => ({
+        ...p,
+        is_liked: p.post_likes?.some((l: { user_id: string }) => l.user_id === userId) || false,
+        likes_count: p.post_likes?.length || p.likes_count || 0,
+        comments_count: p.comments?.length || p.comments_count || 0,
+      }));
+      const collections = (userCollectionsRes.data || []).map((c) => ({
+        ...c,
+        programs_count: c.collection_programs?.[0]?.count ?? 0,
+      }));
 
-      const [{ count: programsCount }, { count: postsCount }] = await Promise.all([
-        supabase.from("programs").select("id", { count: "exact" }).eq("owner_id", userId),
-        supabase.from("posts").select("id", { count: "exact" }).eq("author_id", userId),
-      ]);
-
-      return NextResponse.json({
-        profile: supaProfile,
-        isOwner: true,
-        isFollowing: false,
-        stats: {
-          followersCount: followersCount || 0,
-          followingCount: followingCount || 0,
-          programsCount: programsCount || 0,
-          postsCount: postsCount || 0,
+      return NextResponse.json(
+        {
+          profile: supaProfile,
+          isOwner: true,
+          isFollowing: false,
+          stats: {
+            followersCount,
+            followingCount,
+            programsCount: programs.length,
+            postsCount: posts.length,
+          },
+          programs,
+          posts,
+          collections,
         },
-        programs: [],
-        posts: [],
-        collections: [],
-      });
+        {
+          headers: {
+            "Cache-Control": "private, max-age=3, stale-while-revalidate=15",
+          },
+        }
+      );
     }
-  } catch {}
+  } catch (err) {
+    console.warn("Supabase profile me query exception, using local store:", err);
+  }
 
   const userMeta = {
     username: (user.user_metadata?.user_name as string) || (user.user_metadata?.username as string) || user.email?.split("@")[0] || "developer",
@@ -105,8 +144,9 @@ export async function PUT(request: Request) {
     // Best-effort sync to Supabase if logged in
     if (user) {
       try {
+        const admin = createAdminClient();
         if (parsed.username) {
-          const { data: existing } = await supabase
+          const { data: existing } = await admin
             .from("profiles")
             .select("id")
             .eq("username", parsed.username)
@@ -121,7 +161,7 @@ export async function PUT(request: Request) {
           }
         }
 
-        await supabase
+        await admin
           .from("profiles")
           .update({
             ...parsed,

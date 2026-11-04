@@ -29,6 +29,7 @@ import {
   Search,
   Loader2,
   Globe,
+  Lock,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { useToastStore } from "@/lib/store/useToastStore";
@@ -74,20 +75,22 @@ interface NetworkUser {
   is_verified?: boolean;
 }
 
+const cachedProfileData: Record<string, ProfileData> = {};
+
 export default function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const router = useRouter();
   const { username } = use(params);
   const searchParams = useSearchParams();
   const shouldOpenEdit = searchParams.get("edit") === "true";
 
-  const [data, setData] = useState<ProfileData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<ProfileData | null>(() => cachedProfileData[username] || null);
+  const [loading, setLoading] = useState(() => !cachedProfileData[username]);
   const [activeTab, setActiveTab] = useState<"posts" | "programs" | "collections">("posts");
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowedBy, setIsFollowedBy] = useState(false);
   const [isHoveringFollow, setIsHoveringFollow] = useState(false);
-  const [followersCount, setFollowersCount] = useState(0);
-  const [followingCount, setFollowingCount] = useState(0);
+  const [followersCount, setFollowersCount] = useState(() => cachedProfileData[username]?.stats?.followersCount || 0);
+  const [followingCount, setFollowingCount] = useState(() => cachedProfileData[username]?.stats?.followingCount || 0);
   const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(null);
   const [verifying, setVerifying] = useState(false);
 
@@ -114,7 +117,6 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   const [modalFollowActionLoading, setModalFollowActionLoading] = useState<Record<string, boolean>>({});
 
   const fetchProfile = async () => {
-    if (!data) setLoading(true);
     try {
       const endpoint = username === "me" ? "/api/profiles/me" : `/api/profiles/${username}`;
       const res = await fetch(endpoint);
@@ -124,11 +126,19 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
       }
       const resData = await res.json();
       if (resData.profile) {
+        cachedProfileData[username] = resData;
+        if (resData.profile.username) {
+          cachedProfileData[resData.profile.username] = resData;
+        }
         setData(resData);
         setIsFollowing(Boolean(resData.isFollowing));
         setIsFollowedBy(Boolean(resData.isFollowedBy));
         setFollowersCount(resData.stats?.followersCount || 0);
         setFollowingCount(resData.stats?.followingCount || 0);
+
+        if (username === "me" || resData.isOwner) {
+          setCurrentUser({ id: resData.profile.id, username: resData.profile.username });
+        }
 
         // Pre-fill edit modal with existing values
         setEditFullName(resData.profile.full_name || "");
@@ -144,39 +154,23 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   };
 
   useEffect(() => {
-    if (username === "me") {
+    // 1. Fetch profile data immediately without blocking
+    fetchProfile();
+
+    // 2. If viewing another profile, retrieve current user session once
+    if (username !== "me") {
       const supabase = createClient();
       supabase.auth.getUser().then(({ data: { user } }) => {
-        if (!user) {
-          router.replace("/login?redirectTo=/profile/me");
-          return;
+        if (user) {
+          const fallbackUsername =
+            (user.user_metadata?.user_name as string) ||
+            (user.user_metadata?.username as string) ||
+            user.email?.split("@")[0] ||
+            "";
+          setCurrentUser({ id: user.id, username: fallbackUsername });
         }
-        fetchProfile();
       });
-    } else {
-      fetchProfile();
     }
-
-    // Fetch active logged-in viewer info
-    fetch("/api/profiles/me")
-      .then((res) => res.json())
-      .then((meData) => {
-        if (meData?.profile) {
-          setCurrentUser({ id: meData.profile.id, username: meData.profile.username });
-        }
-      })
-      .catch(() => {});
-
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        const fallbackUsername =
-          (user.user_metadata?.user_name as string) ||
-          user.email?.split("@")[0] ||
-          "";
-        setCurrentUser((prev) => prev || { id: user.id, username: fallbackUsername });
-      }
-    });
   }, [username]);
 
   const handleToggleVerifyUser = async () => {
@@ -803,9 +797,15 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
                     <div className="flex items-center justify-between mb-1.5 sm:mb-2">
                       <div className="flex items-center gap-1.5 min-w-0 mr-2">
                         <span className="font-bold text-xs sm:text-sm text-foreground truncate">{prog.title}</span>
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shrink-0">
-                          <Globe className="w-2.5 h-2.5" /> Public
-                        </span>
+                        {prog.visibility === "private" ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-medium bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
+                            <Lock className="w-2.5 h-2.5" /> Private
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-medium bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shrink-0">
+                            <Globe className="w-2.5 h-2.5" /> Public
+                          </span>
+                        )}
                       </div>
                       <span className="text-[9px] sm:text-[10px] font-mono px-1.5 sm:px-2 py-0.5 rounded bg-primary/10 text-primary shrink-0">
                         {prog.category || "DSA"}
@@ -865,7 +865,7 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
                       {col.title}
                     </span>
                     <span className="text-[10px] sm:text-xs text-muted-foreground shrink-0">
-                      {col.collection_programs?.[0]?.count || 0} programs
+                      {col.programs_count ?? col.collection_programs?.[0]?.count ?? 0} programs
                     </span>
                   </div>
                   {col.description && (

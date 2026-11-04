@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalProfileData } from "@/lib/storage/communityStore";
 import { getLocalPrograms } from "@/lib/storage/workspaceStore";
 
@@ -33,95 +34,126 @@ export async function GET(
     : undefined;
 
   try {
-    // If Supabase has profiles table, attempt query
+    const admin = createAdminClient();
     let targetProfileId: string | null = null;
     let profile = null;
 
     if (username === "me") {
       if (currentUser) {
-        const { data } = await supabase.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
+        const { data } = await admin.from("profiles").select("*").eq("id", currentUser.id).maybeSingle();
         profile = data;
         targetProfileId = currentUser.id;
       }
     } else {
-      const { data } = await supabase.from("profiles").select("*").eq("username", username).maybeSingle();
+      const { data } = await admin.from("profiles").select("*").ilike("username", username).maybeSingle();
       profile = data;
       targetProfileId = profile?.id || null;
     }
 
     if (profile && targetProfileId) {
-      // Fetch follower & following counts
-      const [{ count: followersCount }, { count: followingCount }] = await Promise.all([
-        supabase.from("follows").select("follower_id", { count: "exact" }).eq("following_id", targetProfileId),
-        supabase.from("follows").select("following_id", { count: "exact" }).eq("follower_id", targetProfileId),
-      ]);
-
-      let isFollowing = false;
-      let isFollowedBy = false;
-
-      if (currentUser && currentUser.id !== targetProfileId) {
-        const [{ data: followRecord }, { data: followedByRecord }] = await Promise.all([
-          supabase.from("follows").select("follower_id").eq("follower_id", currentUser.id).eq("following_id", targetProfileId).maybeSingle(),
-          supabase.from("follows").select("follower_id").eq("follower_id", targetProfileId).eq("following_id", currentUser.id).maybeSingle(),
-        ]);
-        isFollowing = !!followRecord;
-        isFollowedBy = !!followedByRecord;
-      }
-
       const isOwner = currentUser?.id === targetProfileId;
 
-      // Fetch public programs from Supabase
-      let supaPrograms: any[] = [];
-      try {
-        const { data: progs } = await supabase
-          .from("programs")
-          .select("*")
-          .eq("owner_id", targetProfileId)
-          .eq("visibility", "public")
-          .order("created_at", { ascending: false });
-        if (progs) supaPrograms = progs;
-      } catch {}
+      // Build program and collection queries based on ownership
+      let programsQuery = admin
+        .from("programs")
+        .select("id, title, description, category, language, visibility, created_at, updated_at")
+        .eq("owner_id", targetProfileId)
+        .order("updated_at", { ascending: false });
 
-      // Resilient local store public programs
+      if (!isOwner) {
+        programsQuery = programsQuery.eq("visibility", "public");
+      }
+
+      let collectionsQuery = admin
+        .from("collections")
+        .select("*, collection_programs(count)")
+        .eq("owner_id", targetProfileId)
+        .order("updated_at", { ascending: false });
+
+      if (!isOwner) {
+        collectionsQuery = collectionsQuery.eq("visibility", "public");
+      }
+
+      const [
+        followersCountRes,
+        followingCountRes,
+        followCheckRes,
+        followedByCheckRes,
+        programsRes,
+        postsRes,
+        collectionsRes,
+      ] = await Promise.all([
+        admin.from("follows").select("follower_id", { count: "exact" }).eq("following_id", targetProfileId),
+        admin.from("follows").select("following_id", { count: "exact" }).eq("follower_id", targetProfileId),
+        currentUser && currentUser.id !== targetProfileId
+          ? admin.from("follows").select("follower_id").eq("follower_id", currentUser.id).eq("following_id", targetProfileId).maybeSingle()
+          : Promise.resolve({ data: null }),
+        currentUser && currentUser.id !== targetProfileId
+          ? admin.from("follows").select("follower_id").eq("follower_id", targetProfileId).eq("following_id", currentUser.id).maybeSingle()
+          : Promise.resolve({ data: null }),
+        programsQuery,
+        admin
+          .from("posts")
+          .select("*, author:profiles!posts_author_id_fkey(*), post_likes(user_id), comments(id)")
+          .eq("author_id", targetProfileId)
+          .order("created_at", { ascending: false }),
+        collectionsQuery,
+      ]);
+
+      const isFollowing = !!followCheckRes.data;
+      const isFollowedBy = !!followedByCheckRes.data;
+      const followersCount = followersCountRes.count ?? (followersCountRes.data?.length || 0);
+      const followingCount = followingCountRes.count ?? (followingCountRes.data?.length || 0);
+
+      // Resilient local store public programs merge if applicable
+      const supaPrograms = programsRes.data || [];
       const localPrograms = await getLocalPrograms();
       const matchedLocal = localPrograms.filter((p) => {
         const belongs = p.owner_id === targetProfileId || (isOwner && p.owner_id === "default-user");
-        return belongs && p.visibility === "public";
+        return isOwner ? belongs : belongs && p.visibility === "public";
       });
 
-      const combinedPrograms = [...supaPrograms];
+      const combinedPrograms: any[] = [...supaPrograms];
       for (const lp of matchedLocal) {
         if (!combinedPrograms.some((p) => p.id === lp.id)) {
           combinedPrograms.push(lp);
         }
       }
 
-      // Fetch posts for this user
-      let userPosts: any[] = [];
-      try {
-        const { data: posts } = await supabase
-          .from("posts")
-          .select("*, author:profiles!posts_author_id_fkey(*)")
-          .eq("author_id", targetProfileId)
-          .order("created_at", { ascending: false });
-        if (posts) userPosts = posts;
-      } catch {}
+      const userPosts = (postsRes.data || []).map((p) => ({
+        ...p,
+        is_liked: currentUser ? p.post_likes?.some((l: { user_id: string }) => l.user_id === currentUser.id) : false,
+        likes_count: p.post_likes?.length || p.likes_count || 0,
+        comments_count: p.comments?.length || p.comments_count || 0,
+      }));
 
-      return NextResponse.json({
-        profile,
-        isOwner,
-        isFollowing,
-        isFollowedBy,
-        stats: {
-          followersCount: followersCount || 0,
-          followingCount: followingCount || 0,
-          programsCount: combinedPrograms.length,
-          postsCount: userPosts.length,
+      const collections = (collectionsRes.data || []).map((c) => ({
+        ...c,
+        programs_count: c.collection_programs?.[0]?.count ?? 0,
+      }));
+
+      return NextResponse.json(
+        {
+          profile,
+          isOwner,
+          isFollowing,
+          isFollowedBy,
+          stats: {
+            followersCount,
+            followingCount,
+            programsCount: combinedPrograms.length,
+            postsCount: userPosts.length,
+          },
+          programs: combinedPrograms,
+          posts: userPosts,
+          collections,
         },
-        programs: combinedPrograms,
-        posts: userPosts,
-        collections: [],
-      });
+        {
+          headers: {
+            "Cache-Control": "private, max-age=3, stale-while-revalidate=15",
+          },
+        }
+      );
     }
   } catch (err) {
     console.warn("Supabase profile fetch fallback to local store:", err);
