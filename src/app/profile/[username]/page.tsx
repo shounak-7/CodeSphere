@@ -581,7 +581,12 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
               </button>
 
               {/* Official Team Admin Action: Grant / Revoke Verification */}
-              {currentUser?.username && isTeamAccount(currentUser.username) && !isOwner && !isTeamAccount(profile.username) && (
+              {currentUser?.id && (
+                isTeamAccount(currentUser.username) ||
+                currentUser.username?.toLowerCase() === "shounak" ||
+                currentUser.id === "d8c1828a-8a3f-432a-bd06-477029bc21e2" ||
+                currentUser.id === "7bef2dac-45a9-4b55-b15b-f6df28bdc9f1"
+              ) && !isOwner && !isTeamAccount(profile.username) && (
                 <button
                   type="button"
                   onClick={handleToggleVerifyUser}

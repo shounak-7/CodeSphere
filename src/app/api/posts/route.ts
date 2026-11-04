@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { getLocalPosts, saveLocalPost, getLocalBookmarks, getLocalProfile } from "@/lib/storage/communityStore";
+import { getLocalPosts, saveLocalPost, getLocalBookmarks, getLocalProfile, isUserVerified } from "@/lib/storage/communityStore";
+import { isTeamAccount } from "@/lib/utils";
 
 const CreatePostSchema = z.object({
   title: z.string().max(150).optional(),
@@ -84,6 +85,15 @@ export async function GET(request: Request) {
 
       const formattedPosts = posts.map((post) => ({
         ...post,
+        author: post.author
+          ? {
+              ...post.author,
+              is_verified:
+                Boolean(post.author.is_verified) ||
+                isTeamAccount(post.author.username) ||
+                isUserVerified(post.author.username),
+            }
+          : undefined,
         is_liked: likedIds.has(post.id),
         is_bookmarked: bookmarkedIds.has(post.id),
         likes_count: post.likes_count || 0,

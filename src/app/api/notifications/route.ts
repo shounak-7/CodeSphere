@@ -6,7 +6,9 @@ import {
   deleteLocalNotification,
   clearLocalNotifications,
   getLocalNotifications,
+  isUserVerified,
 } from "@/lib/storage/communityStore";
+import { isTeamAccount } from "@/lib/utils";
 
 async function resolveCurrentUser() {
   const supabase = await createClient();
@@ -88,6 +90,15 @@ export async function GET() {
 
         return {
           ...n,
+          actor: n.actor
+            ? {
+                ...n.actor,
+                is_verified:
+                  Boolean(n.actor.is_verified) ||
+                  isTeamAccount(n.actor.username) ||
+                  isUserVerified(n.actor.username),
+              }
+            : undefined,
           post_title: postTitle,
           comment_text: commentText,
         };

@@ -4,8 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import {
   getLocalCollections,
   saveLocalCollection,
+  isUserVerified,
 } from "@/lib/storage/communityStore";
 import { getLocalPrograms } from "@/lib/storage/workspaceStore";
+import { isTeamAccount } from "@/lib/utils";
 
 const CreateCollectionSchema = z.object({
   title: z.string().min(1, "Folder name is required").max(100),
@@ -35,6 +37,15 @@ export async function GET(request: Request) {
     if (!error && collections && collections.length > 0) {
       const sanitized = collections.map((col) => ({
         ...col,
+        owner: col.owner
+          ? {
+              ...col.owner,
+              is_verified:
+                Boolean(col.owner.is_verified) ||
+                isTeamAccount(col.owner.username) ||
+                isUserVerified(col.owner.username),
+            }
+          : undefined,
         collection_programs: (col.collection_programs || []).filter(
           (cp: any) => cp.program != null
         ),

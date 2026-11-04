@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { getLocalBookmarks, toggleLocalBookmark } from "@/lib/storage/communityStore";
+import { getLocalBookmarks, toggleLocalBookmark, isUserVerified } from "@/lib/storage/communityStore";
+import { isTeamAccount } from "@/lib/utils";
 
 const BookmarkSchema = z.object({
   target_type: z.enum(["post", "program", "collection"]),
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
             ? supabase
                 .from("posts")
                 .select(
-                  `*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url), comments(id), post_likes(user_id)`
+                  `*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`
                 )
                 .in("id", postIds)
             : Promise.resolve({ data: [] }),
@@ -59,14 +60,22 @@ export async function GET(request: Request) {
 
         const postsMap = new Map(
           (postsRes.data || []).map((p: any) => {
-            const isLiked = user ? p.post_likes?.some((l: { user_id: string }) => l.user_id === user.id) : false;
-            const likesCount = p.post_likes?.length || p.likes_count || 0;
-            const commentsCount = typeof p.comments?.length === "number" ? p.comments.length : (p.comments_count || 0);
+            const likesCount = p.likes_count || 0;
+            const commentsCount = p.comments_count || 0;
             return [
               p.id,
               {
                 ...p,
-                is_liked: isLiked,
+                author: p.author
+                  ? {
+                      ...p.author,
+                      is_verified:
+                        Boolean(p.author.is_verified) ||
+                        isTeamAccount(p.author.username) ||
+                        isUserVerified(p.author.username),
+                    }
+                  : undefined,
+                is_liked: false,
                 is_bookmarked: true,
                 likes_count: likesCount,
                 comments_count: commentsCount,

@@ -7,6 +7,7 @@ import { MessageSquare, Send, User, Search, Loader2, ArrowLeft, Clock } from "lu
 import { formatRelativeTime } from "@/lib/utils";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { createClient } from "@/lib/supabase/client";
+import { useUserStore } from "@/lib/store/useUserStore";
 
 interface Conversation {
   id: string;
@@ -40,7 +41,8 @@ function MessagesContent() {
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const storeUserId = useUserStore((s) => s.user?.id);
+  const currentUserId = storeUserId || null;
   const [loadingConvs, setLoadingConvs] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
@@ -81,10 +83,6 @@ function MessagesContent() {
   }, []);
 
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id);
-    });
     loadConversations();
   }, [loadConversations]);
 

@@ -43,6 +43,7 @@ interface CollectionDetail {
     username: string;
     full_name: string;
     avatar_url: string;
+    is_verified?: boolean;
   };
   programs: CollectionProgram[];
 }

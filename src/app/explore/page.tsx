@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
+import { useUserStore } from "@/lib/store/useUserStore";
 import {
   Search,
   Code2,
@@ -36,14 +37,7 @@ function ExploreContent() {
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>("all");
   const [activeModalProgram, setActiveModalProgram] = useState<DSALibraryProgram | null>(null);
   const [importingId, setImportingId] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id);
-    });
-  }, []);
+  const currentUserId = useUserStore((s) => s.user?.id) || null;
 
   // Sync state if URL search params change
   useEffect(() => {

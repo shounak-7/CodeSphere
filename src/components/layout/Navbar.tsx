@@ -97,7 +97,7 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     }
   };
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     if (typeof document !== "undefined" && document.hidden) return;
     if (!userRef.current) return;
     try {
@@ -123,7 +123,7 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
     } catch {
       // Ignore
     }
-  };
+  }, []);
 
   // Initialize global auth store
   useEffect(() => {

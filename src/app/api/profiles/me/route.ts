@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalProfileData, saveLocalProfile } from "@/lib/storage/communityStore";
+import { isTeamAccount } from "@/lib/utils";
 
 const UpdateProfileSchema = z.object({
   full_name: z.string().max(100).optional(),
@@ -34,13 +35,19 @@ export async function GET(request: Request) {
     try {
       const { data: supaProfile } = await admin
         .from("profiles")
-        .select("id, username, full_name, avatar_url, bio, college, skills, is_verified, created_at")
+        .select("id, username, full_name, avatar_url, bio, college, skills, created_at")
         .eq("id", userId)
         .maybeSingle();
 
       if (supaProfile) {
+        const profileWithVerified = {
+          ...supaProfile,
+          is_verified:
+            isTeamAccount(supaProfile.username) ||
+            (user.user_metadata?.is_verified === true),
+        };
         return NextResponse.json(
-          { profile: supaProfile },
+          { profile: profileWithVerified },
           {
             headers: {
               "Cache-Control": "private, max-age=15, stale-while-revalidate=60",
@@ -73,7 +80,7 @@ export async function GET(request: Request) {
         .order("updated_at", { ascending: false }),
       admin
         .from("posts")
-        .select("*, author:profiles!posts_author_id_fkey(*), post_likes(user_id), comments(id)")
+        .select("id, title, content, post_type, code_snippet, language, tags, likes_count, comments_count, created_at, updated_at")
         .eq("author_id", userId)
         .order("created_at", { ascending: false }),
       admin
@@ -86,14 +93,27 @@ export async function GET(request: Request) {
     const supaProfile = profileRes.data;
 
     if (supaProfile) {
+      const isProfileVerified =
+        Boolean((supaProfile as any).is_verified) ||
+        isTeamAccount(supaProfile.username) ||
+        (user?.user_metadata?.is_verified === true);
+      const fullProfile = { ...supaProfile, is_verified: isProfileVerified };
+
       const followersCount = followersCountRes.count ?? (followersCountRes.data?.length || 0);
       const followingCount = followingCountRes.count ?? (followingCountRes.data?.length || 0);
       const programs = userProgramsRes.data || [];
       const posts = (userPostsRes.data || []).map((p) => ({
         ...p,
-        is_liked: p.post_likes?.some((l: { user_id: string }) => l.user_id === userId) || false,
-        likes_count: p.post_likes?.length || p.likes_count || 0,
-        comments_count: p.comments?.length || p.comments_count || 0,
+        author: {
+          id: supaProfile.id,
+          username: supaProfile.username,
+          full_name: supaProfile.full_name,
+          avatar_url: supaProfile.avatar_url,
+          is_verified: isProfileVerified,
+        },
+        is_liked: false,
+        likes_count: p.likes_count || 0,
+        comments_count: p.comments_count || 0,
       }));
       const collections = (userCollectionsRes.data || []).map((c) => ({
         ...c,
@@ -102,7 +122,7 @@ export async function GET(request: Request) {
 
       return NextResponse.json(
         {
-          profile: supaProfile,
+          profile: fullProfile,
           isOwner: true,
           isFollowing: false,
           stats: {
