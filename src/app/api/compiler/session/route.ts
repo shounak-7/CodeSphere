@@ -53,6 +53,10 @@ export async function POST(request: Request) {
         ? `${publicCompilerUrl}/session/${sessionId}/stream?token=${encodeURIComponent(token)}`
         : `/api/compiler/session/${sessionId}/stream?token=${encodeURIComponent(token)}`;
 
+      const wsUrl = publicCompilerUrl
+        ? `${publicCompilerUrl.replace(/^http/, "ws")}/session/${sessionId}/ws?token=${encodeURIComponent(token)}`
+        : null;
+
       const inputUrl = publicCompilerUrl
         ? `${publicCompilerUrl}/session/${sessionId}/input`
         : `/api/compiler/session/${sessionId}/input`;
@@ -67,6 +71,7 @@ export async function POST(request: Request) {
         token,
         expiresAt,
         streamUrl,
+        wsUrl,
         inputUrl,
         killUrl,
       });

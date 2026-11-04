@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { WebSocketServer } from 'ws';
 import { executeCProgram } from './executor.js';
 import {
   createSession,
@@ -250,6 +251,129 @@ const server = createServer(async (req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Endpoint Not Found' }));
+});
+
+// WebSocket Server for bidirectional, zero-latency streaming terminal connection
+const wss = new WebSocketServer({ noServer: true });
+
+wss.on('connection', (ws, req, meta) => {
+  // 1. Session-attached WebSocket: /session/:id/ws?token=...
+  if (meta?.sessionId) {
+    const { sessionId } = meta;
+
+    const unsubscribe = subscribeToSession(sessionId, (event) => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify(event));
+      }
+    });
+
+    ws.on('message', (raw) => {
+      try {
+        const text = raw.toString();
+        const parsed = JSON.parse(text);
+        if (parsed.type === 'input') {
+          writeSessionInput(sessionId, parsed.data ?? parsed.input ?? '', Boolean(parsed.isEof));
+        } else if (parsed.type === 'kill') {
+          terminateSession(sessionId, 'Process terminated by user request.');
+        }
+      } catch {
+        // Raw string input
+        writeSessionInput(sessionId, raw.toString(), false);
+      }
+    });
+
+    ws.on('close', () => {
+      unsubscribe();
+    });
+    return;
+  }
+
+  // 2. Direct full-lifecycle WebSocket: /ws/execute
+  if (meta?.directExecute) {
+    let activeSessionId = null;
+    let unsubscribe = null;
+
+    ws.on('message', async (raw) => {
+      try {
+        const parsed = JSON.parse(raw.toString());
+        if (parsed.type === 'run' && parsed.code) {
+          const result = await createSession({
+            code: parsed.code,
+            userId: parsed.userId || 'anonymous',
+            secret: COMPILER_API_SECRET,
+          });
+
+          if (!result.success) {
+            ws.send(JSON.stringify({ type: 'error', phase: result.phase, error: result.error }));
+            return;
+          }
+
+          activeSessionId = result.sessionId;
+          ws.send(JSON.stringify({ type: 'started', sessionId: result.sessionId, token: result.token }));
+
+          unsubscribe = subscribeToSession(activeSessionId, (event) => {
+            if (ws.readyState === ws.OPEN) {
+              ws.send(JSON.stringify(event));
+            }
+          });
+        } else if (parsed.type === 'input' && activeSessionId) {
+          writeSessionInput(activeSessionId, parsed.data ?? parsed.input ?? '', Boolean(parsed.isEof));
+        } else if (parsed.type === 'kill' && activeSessionId) {
+          terminateSession(activeSessionId, 'Process terminated by user request.');
+        }
+      } catch (err) {
+        if (activeSessionId) {
+          writeSessionInput(activeSessionId, raw.toString(), false);
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      if (unsubscribe) unsubscribe();
+      if (activeSessionId) {
+        terminateSession(activeSessionId, 'WebSocket client disconnected.');
+      }
+    });
+  }
+});
+
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const pathname = url.pathname;
+
+  // Pattern: /session/:id/ws
+  const wsMatch = pathname.match(/^\/session\/([a-zA-Z0-9_-]+)\/ws$/);
+  if (wsMatch) {
+    const sessionId = wsMatch[1];
+    const queryToken = url.searchParams.get('token');
+    if (!verifyAuth(req, sessionId, queryToken)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const session = getSession(sessionId);
+    if (!session) {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req, { sessionId, session });
+    });
+    return;
+  }
+
+  // Pattern: /ws/execute (direct execution over single WebSocket)
+  if (pathname === '/ws/execute') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req, { directExecute: true });
+    });
+    return;
+  }
+
+  socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+  socket.destroy();
 });
 
 server.listen(PORT, '0.0.0.0', () => {

@@ -17,7 +17,6 @@ __attribute__((constructor)) static void __codesphere_unbuffer() {
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024; // 2 MB output buffer limit
 const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes idle cleanup
-const SANDBOX_RUNNER_PATH = '/app/sandbox-runner';
 
 // Active in-memory session store
 const sessions = new Map();

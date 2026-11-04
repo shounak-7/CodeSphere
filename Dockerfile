@@ -10,9 +10,19 @@ RUN addgroup -g 1001 servicegroup && \
 
 WORKDIR /app
 
-# Copy package and sources (handles root context)
-COPY compiler-service/package.json ./package.json
-COPY compiler-service/src ./src
+# Universal context copy (handles both repo root and compiler-service subdirectory)
+COPY . /tmp/build/
+RUN if [ -f /tmp/build/compiler-service/package.json ]; then \
+        cp /tmp/build/compiler-service/package.json /app/package.json && \
+        cp -r /tmp/build/compiler-service/src /app/src; \
+    else \
+        cp /tmp/build/package.json /app/package.json && \
+        cp -r /tmp/build/src /app/src; \
+    fi && \
+    rm -rf /tmp/build
+
+# Install dependencies (ws)
+RUN npm install --omit=dev
 
 # Lock down /app permissions
 RUN chown -R serviceuser:servicegroup /app && \

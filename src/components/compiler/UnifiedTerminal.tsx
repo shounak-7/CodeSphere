@@ -448,10 +448,10 @@ export function UnifiedTerminal({
                     return (
                       <span
                         key={entry.id}
-                        className="inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-cyan-950/60 text-indigo-900 dark:text-cyan-200 font-bold border border-indigo-300 dark:border-cyan-700/60 font-mono text-[11px]"
+                        className="text-emerald-600 dark:text-cyan-300 font-bold font-mono whitespace-pre-wrap"
                       >
-                        <span className="text-emerald-500 font-bold">➜</span>
-                        <span>{entry.text}</span>
+                        {entry.text}
+                        {"\n"}
                       </span>
                     );
                   }
@@ -500,6 +500,14 @@ export function UnifiedTerminal({
                     </div>
                   )}
                 </>
+              )}
+
+              {/* Real-time VS Code-style inline typing prompt & cursor when running */}
+              {isRunning && (
+                <span className="inline-flex items-center text-emerald-600 dark:text-cyan-300 font-bold font-mono">
+                  <span>{currentLine}</span>
+                  <span className="w-2 h-3.5 sm:h-4 bg-emerald-500 dark:bg-cyan-400 animate-pulse ml-0.5 inline-block align-middle" />
+                </span>
               )}
             </div>
 

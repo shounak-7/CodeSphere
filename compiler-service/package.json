@@ -7,5 +7,7 @@
     "start": "node src/server.js",
     "test": "node --test tests/*.test.js"
   },
-  "dependencies": {}
+  "dependencies": {
+    "ws": "^8.22.1"
+  }
 }

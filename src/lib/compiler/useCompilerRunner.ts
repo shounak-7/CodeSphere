@@ -94,6 +94,7 @@ export function useCompilerRunner(): CompilerRunnerState {
   const activeTokenRef = useRef<string | null>(null);
   const inputUrlRef = useRef<string | null>(null);
   const killUrlRef = useRef<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -111,6 +112,14 @@ export function useCompilerRunner(): CompilerRunnerState {
     const sid = activeSessionRef.current;
     const killUrl = killUrlRef.current || (sid ? `/api/compiler/session/${sid}/kill` : null);
     const token = activeTokenRef.current;
+
+    // Send kill via WebSocket if open
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ type: "kill" }));
+      } catch {}
+    }
+
     if (killUrl) {
       try {
         await fetch(killUrl, {
@@ -118,6 +127,12 @@ export function useCompilerRunner(): CompilerRunnerState {
           headers: token ? { "x-session-token": token } : {},
         });
       } catch {}
+    }
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch {}
+      wsRef.current = null;
     }
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -139,7 +154,7 @@ export function useCompilerRunner(): CompilerRunnerState {
       {
         id: Math.random().toString(36).substring(2, 9),
         type: "system",
-        text: "[Process terminated by user]",
+        text: "[Process terminated by user (SIGKILL)]",
       },
     ]);
   }, []);
@@ -148,9 +163,9 @@ export function useCompilerRunner(): CompilerRunnerState {
     const sid = activeSessionRef.current;
     const inputUrl = inputUrlRef.current || (sid ? `/api/compiler/session/${sid}/input` : null);
     const token = activeTokenRef.current;
-    if (!inputUrl) return false;
+    if (!sid && !inputUrl && !wsRef.current) return false;
 
-    // Record the user input immediately in terminal entries for responsive feedback
+    // Record user input line in terminal stream
     setTerminalEntries((prev) => [
       ...prev,
       {
@@ -160,26 +175,37 @@ export function useCompilerRunner(): CompilerRunnerState {
       },
     ]);
 
-    try {
-      const res = await fetch(inputUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { "x-session-token": token } : {}),
-        },
-        body: JSON.stringify({ input: line }),
-      });
-      return res.ok;
-    } catch {
-      return false;
+    // Send via WebSocket if connected
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ type: "input", data: line }));
+        return true;
+      } catch {}
     }
+
+    // Fallback to HTTP POST
+    if (inputUrl) {
+      try {
+        const res = await fetch(inputUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { "x-session-token": token } : {}),
+          },
+          body: JSON.stringify({ input: line }),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }, []);
 
   const sendEof = useCallback(async (): Promise<boolean> => {
     const sid = activeSessionRef.current;
     const inputUrl = inputUrlRef.current || (sid ? `/api/compiler/session/${sid}/input` : null);
     const token = activeTokenRef.current;
-    if (!inputUrl) return false;
 
     setTerminalEntries((prev) => [
       ...prev,
@@ -190,19 +216,29 @@ export function useCompilerRunner(): CompilerRunnerState {
       },
     ]);
 
-    try {
-      const res = await fetch(inputUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { "x-session-token": token } : {}),
-        },
-        body: JSON.stringify({ input: "", isEof: true }),
-      });
-      return res.ok;
-    } catch {
-      return false;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ type: "input", data: "", isEof: true }));
+        return true;
+      } catch {}
     }
+
+    if (inputUrl) {
+      try {
+        const res = await fetch(inputUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { "x-session-token": token } : {}),
+          },
+          body: JSON.stringify({ input: "", isEof: true }),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }, []);
 
   const runCode = useCallback(async (code: string, fallbackStdin = "") => {
@@ -275,133 +311,112 @@ export function useCompilerRunner(): CompilerRunnerState {
         setTerminalEntries([]);
       }
 
-      // 2. Connect to SSE stream (direct to Render or via Next.js proxy)
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
+      // 2. Connect via WebSocket (preferred for VS Code-like full bidirectional streaming) or SSE fallback
+      const wsUrl = startData.wsUrl as string | null;
+      const streamUrl = (startData.streamUrl as string) || `/api/compiler/session/${sessionId}/stream`;
 
-      const streamUrl = startData.streamUrl || `/api/compiler/session/${sessionId}/stream`;
-      const eventSource = new EventSource(streamUrl);
-      eventSourceRef.current = eventSource;
-
-      const runDirectCompile = async () => {
-        try {
-          setStderr("");
-          setProblems([]);
-          setTerminalEntries([]);
-          const res = await fetch("/api/compile", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code, stdin: fallbackStdin }),
-          });
-          const compData = await res.json();
-          const duration = compData.durationMs ?? (Date.now() - startTime);
+      const handlePayload = (payload: any) => {
+        if (!payload) return;
+        if (payload.type === "stdout" && payload.data) {
+          setStdout((prev) => prev + payload.data);
+          setTerminalEntries((prev) => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              type: "stdout",
+              text: payload.data,
+            },
+          ]);
+        } else if (payload.type === "stderr" && payload.data) {
+          setStderr((prev) => prev + payload.data);
+          setProblems((prev) => [...prev, ...parseCompilerDiagnostics(payload.data)]);
+          setTerminalEntries((prev) => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              type: "stderr",
+              text: payload.data,
+            },
+          ]);
+        } else if (payload.type === "exit") {
+          const codeNum = payload.code ?? 0;
+          const duration = payload.durationMs ?? (Date.now() - startTime);
+          setExitCode(codeNum);
           setDurationMs(duration);
+          setStatus(codeNum === 0 ? "success" : "error");
           setIsRunning(false);
-
-          if (compData.success) {
-            setStdout(compData.stdout || "");
-            setStderr(compData.stderr || "");
-            setExitCode(0);
-            setStatus("success");
-            setTerminalEntries([
-              ...(compData.stdout
-                ? [{ id: Math.random().toString(36).substring(2, 9), type: "stdout" as const, text: compData.stdout }]
-                : []),
-              {
-                id: Math.random().toString(36).substring(2, 9),
-                type: "exit" as const,
-                text: `[Process completed with exit code 0]`,
-                code: 0,
-                durationMs: duration,
-              },
-            ]);
-          } else {
-            const errText = compData.error || compData.stderr || "Execution failed";
-            setStderr(errText);
-            setExitCode(compData.exitCode ?? 1);
-            setStatus("error");
-            setProblems(parseCompilerDiagnostics(errText));
-            setTerminalEntries([
-              { id: Math.random().toString(36).substring(2, 9), type: "stderr" as const, text: errText },
-              {
-                id: Math.random().toString(36).substring(2, 9),
-                type: "exit" as const,
-                text: `[Process exited with error code ${compData.exitCode ?? 1}]`,
-                code: compData.exitCode ?? 1,
-                durationMs: duration,
-              },
-            ]);
+          activeSessionRef.current = null;
+          setActiveSessionId(null);
+          setTerminalEntries((prev) => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              type: "exit",
+              text: `[Process completed with exit code ${codeNum}]`,
+              code: codeNum,
+              durationMs: duration,
+            },
+          ]);
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
           }
-        } catch {
-          setIsRunning(false);
-          setStatus("error");
-          setExitCode(1);
+          if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+          }
         }
       };
 
-      eventSource.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload.type === "stdout" && payload.data) {
-            setStdout((prev) => prev + payload.data);
-            setTerminalEntries((prev) => [
-              ...prev,
-              {
-                id: Math.random().toString(36).substring(2, 9),
-                type: "stdout",
-                text: payload.data,
-              },
-            ]);
-          } else if (payload.type === "stderr" && payload.data) {
-            if (payload.data.includes("sandbox-runner: setgid failed")) {
-              eventSource.close();
-              eventSourceRef.current = null;
-              runDirectCompile();
-              return;
-            }
-            setStderr((prev) => prev + payload.data);
-            setProblems((prev) => [...prev, ...parseCompilerDiagnostics(payload.data)]);
-            setTerminalEntries((prev) => [
-              ...prev,
-              {
-                id: Math.random().toString(36).substring(2, 9),
-                type: "stderr",
-                text: payload.data,
-              },
-            ]);
-          } else if (payload.type === "exit") {
-            const codeNum = payload.code ?? 0;
-            const duration = payload.durationMs ?? (Date.now() - startTime);
-            setExitCode(codeNum);
-            setDurationMs(duration);
-            setStatus(codeNum === 0 ? "success" : "error");
-            setIsRunning(false);
-            activeSessionRef.current = null;
-            setActiveSessionId(null);
-            setTerminalEntries((prev) => [
-              ...prev,
-              {
-                id: Math.random().toString(36).substring(2, 9),
-                type: "exit",
-                text: `[Process completed with exit code ${codeNum}]`,
-                code: codeNum,
-                durationMs: duration,
-              },
-            ]);
+      const connectSSE = () => {
+        if (eventSourceRef.current) return;
+        const eventSource = new EventSource(streamUrl);
+        eventSourceRef.current = eventSource;
+
+        eventSource.onmessage = (event) => {
+          try {
+            handlePayload(JSON.parse(event.data));
+          } catch {}
+        };
+
+        eventSource.onerror = () => {
+          if (eventSource.readyState === EventSource.CLOSED) {
             eventSource.close();
             eventSourceRef.current = null;
           }
-        } catch {}
+        };
       };
 
-      eventSource.onerror = () => {
-        // Only close if stream is permanently closed by the server (readyState === 2: CLOSED)
-        // If readyState is 0 (CONNECTING), browser is auto-reconnecting so do not kill it
-        if (eventSource.readyState === EventSource.CLOSED) {
-          eventSource.close();
-          eventSourceRef.current = null;
+      // Connect via WebSocket if available
+      if (wsUrl && typeof WebSocket !== "undefined") {
+        try {
+          const ws = new WebSocket(wsUrl);
+          wsRef.current = ws;
+
+          ws.onmessage = (event) => {
+            try {
+              handlePayload(JSON.parse(event.data.toString()));
+            } catch {}
+          };
+
+          ws.onerror = () => {
+            // WebSocket blocked or failed to upgrade, fallback to SSE seamlessly
+            if (activeSessionRef.current === sessionId && !eventSourceRef.current) {
+              connectSSE();
+            }
+          };
+
+          ws.onclose = () => {
+            if (activeSessionRef.current === sessionId && isRunning && !eventSourceRef.current) {
+              connectSSE();
+            }
+          };
+        } catch {
+          connectSSE();
         }
-      };
+      } else {
+        connectSSE();
+      }
 
       // If user had preset fallback input (e.g. from STDIN drawer), feed it into the process
       if (fallbackStdin) {
