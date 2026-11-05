@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
-import { Send, Code2, HelpCircle, Trophy, Sparkles, X, Plus, LogIn } from "lucide-react";
+import { Send, Code2, HelpCircle, Trophy, Sparkles, X, Plus, LogIn, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useToastStore } from "@/lib/store/useToastStore";
+import { optimizePostImage, formatBytes } from "@/lib/utils/imageOptimizer";
 
 interface PostComposerProps {
   onPostCreated: () => void;
@@ -19,6 +20,60 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
   const [tagsInput, setTagsInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAttachImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingMedia(true);
+      // 1. Optimize and compress image
+      const optimized = await optimizePostImage(file);
+      setMediaPreview(optimized.previewUrl);
+
+      // 2. Upload to Supabase Storage via /api/upload
+      const formData = new FormData();
+      formData.append("file", optimized.file);
+      formData.append("type", "post_media");
+
+      const uploadRes = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok || !uploadData.publicUrl) {
+        throw new Error(uploadData.error || "Failed to upload image");
+      }
+
+      setMediaUrl(uploadData.publicUrl);
+      setIsExpanded(true);
+      useToastStore
+        .getState()
+        .addToast(
+          `Image attached (${formatBytes(optimized.compressedSize)})!`,
+          "success"
+        );
+    } catch (err) {
+      setMediaPreview(null);
+      setMediaUrl(null);
+      useToastStore
+        .getState()
+        .addToast(err instanceof Error ? err.message : "Failed to upload image", "error");
+    } finally {
+      setUploadingMedia(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveMedia = () => {
+    setMediaUrl(null);
+    setMediaPreview(null);
+  };
 
   if (!currentUser) {
     return (
@@ -64,6 +119,7 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
           content: content.trim(),
           post_type: showCodeInput ? "code" : postType,
           code_snippet: showCodeInput ? codeSnippet : null,
+          media_url: mediaUrl,
           language: "c",
           tags,
         }),
@@ -73,6 +129,8 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
         setContent("");
         setTitle("");
         setCodeSnippet("");
+        setMediaUrl(null);
+        setMediaPreview(null);
         setTagsInput("");
         setShowCodeInput(false);
         setIsExpanded(false);
@@ -159,6 +217,26 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
           </div>
         )}
 
+        {/* Attached Media Preview */}
+        {mediaPreview && (
+          <div className="relative rounded-xl overflow-hidden border border-border bg-slate-950/40 p-1.5 inline-block group">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={mediaPreview}
+              alt="Attachment Preview"
+              className="max-h-48 rounded-lg object-contain"
+            />
+            <button
+              type="button"
+              onClick={handleRemoveMedia}
+              className="absolute top-3 right-3 p-1.5 rounded-full bg-black/70 hover:bg-black text-white hover:text-rose-400 transition-all cursor-pointer shadow-md"
+              title="Remove attachment"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {isExpanded && (
           <input
             type="text"
@@ -184,6 +262,35 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
                 <span>Add C Code</span>
               </button>
             )}
+
+            {!mediaUrl && (
+              <button
+                type="button"
+                disabled={uploadingMedia}
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-muted-foreground hover:text-foreground bg-secondary hover:bg-secondary/80 border border-border transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {uploadingMedia ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                    <span>Compressing...</span>
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="w-3.5 h-3.5 text-primary" />
+                    <span>Add Image</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={handleAttachImage}
+              className="hidden"
+            />
           </div>
 
           <div className="flex items-center gap-2">

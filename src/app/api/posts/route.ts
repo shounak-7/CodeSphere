@@ -4,12 +4,14 @@ import { createClient } from "@/lib/supabase/server";
 import { getLocalPosts, saveLocalPost, getLocalBookmarks, getLocalProfile, isUserVerified } from "@/lib/storage/communityStore";
 import { isTeamAccount } from "@/lib/utils";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
+import { invalidateStorageCache } from "@/lib/server/storageQuota";
 
 const CreatePostSchema = z.object({
   title: z.string().max(150).optional(),
   content: z.string().min(1, "Post content is required").max(5000),
   post_type: z.enum(["text", "code", "achievement", "question", "update"]).default("text"),
   code_snippet: z.string().max(30000).optional().nullable(),
+  media_url: z.string().max(1000).optional().nullable(),
   language: z.string().default("c"),
   program_id: z.string().uuid().nullable().optional(),
   tags: z.array(z.string()).default([]),
@@ -175,24 +177,40 @@ export async function POST(request: Request) {
           });
         }
 
-        const { data: post, error } = await supabase
+        const insertPayload: any = {
+          author_id: user.id,
+          title: parsed.title || null,
+          content: parsed.content,
+          post_type: parsed.post_type,
+          code_snippet: parsed.code_snippet || null,
+          media_url: parsed.media_url || null,
+          language: parsed.language,
+          program_id: parsed.program_id || null,
+          tags: parsed.tags,
+        };
+
+        let { data: post, error } = await supabase
           .from("posts")
-          .insert({
-            author_id: user.id,
-            title: parsed.title || null,
-            content: parsed.content,
-            post_type: parsed.post_type,
-            code_snippet: parsed.code_snippet || null,
-            language: parsed.language,
-            program_id: parsed.program_id || null,
-            tags: parsed.tags,
-          })
+          .insert(insertPayload)
           .select(`*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`)
           .single();
+
+        if (error && (error as any).code === "42703") {
+          // Column media_url not yet created in Supabase schema; retry insert without it
+          delete insertPayload.media_url;
+          const retry = await supabase
+            .from("posts")
+            .insert(insertPayload)
+            .select(`*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`)
+            .single();
+          post = retry.data ? { ...retry.data, media_url: parsed.media_url || null } : null;
+          error = retry.error;
+        }
 
         if (error) {
           console.error("Supabase post creation error:", error);
         } else if (post) {
+          invalidateStorageCache(user.id);
           return NextResponse.json({ post }, { status: 201 });
         }
       } catch (dbErr) {
@@ -208,6 +226,7 @@ export async function POST(request: Request) {
       content: parsed.content,
       post_type: parsed.post_type,
       code_snippet: parsed.code_snippet,
+      media_url: parsed.media_url,
       language: parsed.language,
       program_id: parsed.program_id,
       tags: parsed.tags,

@@ -51,7 +51,7 @@ export async function GET(request: Request) {
       }));
       return NextResponse.json(
         { collections: sanitized },
-        { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60" } }
+        { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
       );
     }
   } catch {
@@ -62,7 +62,7 @@ export async function GET(request: Request) {
   const localCollections = await getLocalCollections();
   return NextResponse.json(
     { collections: localCollections },
-    { headers: { "Cache-Control": "public, s-maxage=10, stale-while-revalidate=60" } }
+    { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
   );
 }
 

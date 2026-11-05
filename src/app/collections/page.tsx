@@ -158,7 +158,14 @@ export default function CollectionsPage() {
         try {
           const res = await fetch(`/api/collections/${col.id}`, { method: "DELETE" });
           if (res.ok) {
-            setCollections((prev) => prev.filter((c) => c.id !== col.id));
+            setCollections((prev) => {
+              const updated = prev.filter((c) => c.id !== col.id);
+              cachedCollections = updated;
+              try {
+                sessionStorage.setItem("codesphere_collections_cache", JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
             useToastStore.getState().addToast("Collection deleted successfully", "success");
           } else {
             useToastStore.getState().addToast("Failed to delete collection", "error");

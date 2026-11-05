@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getLocalPrograms, saveLocalProgram } from "@/lib/storage/workspaceStore";
+import { checkStorageQuota, invalidateStorageCache } from "@/lib/server/storageQuota";
 
 const CreateProgramSchema = z.object({
   title: z.string().min(1, "Title is required").max(100),
@@ -71,6 +72,16 @@ export async function POST(request: Request) {
       parsed.content ||
       `#include <stdio.h>\n\nint main() {\n    printf("Hello from CodeSphere!\\n");\n    return 0;\n}`;
 
+    // Validate storage quota before saving program
+    const incomingCodeBytes = Buffer.byteLength(finalSourceCode, "utf8");
+    const quotaCheck = await checkStorageQuota(user.id, incomingCodeBytes, "code");
+    if (!quotaCheck.allowed) {
+      return NextResponse.json(
+        { error: quotaCheck.reason },
+        { status: 413 }
+      );
+    }
+
     // Try Supabase first if authenticated
     if (user) {
       try {
@@ -126,6 +137,7 @@ export async function POST(request: Request) {
             });
           } catch {}
 
+          invalidateStorageCache(user.id);
           return NextResponse.json({ program }, { status: 201 });
         }
       } catch (dbErr) {

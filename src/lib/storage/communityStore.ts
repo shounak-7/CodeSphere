@@ -18,6 +18,7 @@ export interface StoredPost {
   content: string;
   post_type: "text" | "code" | "achievement" | "question" | "update";
   code_snippet?: string | null;
+  media_url?: string | null;
   language?: string;
   program_id?: string | null;
   tags: string[];
@@ -635,6 +636,7 @@ export async function saveLocalPost(postData: Partial<StoredPost>): Promise<Stor
     content: postData.content || "",
     post_type: postData.post_type || "text",
     code_snippet: postData.code_snippet || null,
+    media_url: postData.media_url || null,
     language: postData.language || "c",
     program_id: postData.program_id || null,
     tags: postData.tags || [],

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { deleteLocalPost } from "@/lib/storage/communityStore";
+import { deleteUserMedia, invalidateStorageCache } from "@/lib/server/storageQuota";
 
 export async function DELETE(
   request: Request,
@@ -27,6 +28,18 @@ export async function DELETE(
 
   let deletedFromSupabase = false;
   try {
+    // 1. Fetch post to check if it has media attached before deleting
+    const { data: existingPost } = await supabase
+      .from("posts")
+      .select("media_url")
+      .eq("id", id)
+      .eq("author_id", userId)
+      .maybeSingle();
+
+    if (existingPost?.media_url) {
+      await deleteUserMedia(userId, existingPost.media_url);
+    }
+
     const { data, error } = await supabase
       .from("posts")
       .delete()
@@ -47,6 +60,8 @@ export async function DELETE(
       { status: 403 }
     );
   }
+
+  invalidateStorageCache(userId);
 
   return NextResponse.json({ success: true, deletedId: id });
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { saveLocalProgram, deleteLocalProgram, getLocalPrograms } from "@/lib/storage/workspaceStore";
+import { checkStorageQuota, invalidateStorageCache } from "@/lib/server/storageQuota";
 
 const UpdateProgramSchema = z.object({
   title: z.string().min(1).max(100).optional(),
@@ -64,6 +65,15 @@ export async function PUT(
     // Try Supabase update if authenticated
     if (currentUser) {
       try {
+        // Pre-flight quota check if source code or version is changing
+        if (parsed.source_code !== undefined || create_version) {
+          const incomingBytes = parsed.source_code ? Buffer.byteLength(parsed.source_code, "utf8") : 0;
+          const quotaCheck = await checkStorageQuota(currentUser.id, create_version ? incomingBytes : 0, "code");
+          if (!quotaCheck.allowed) {
+            return NextResponse.json({ error: quotaCheck.reason }, { status: 413 });
+          }
+        }
+
         const { data: updated, error } = await supabase
           .from("programs")
           .update({
@@ -96,6 +106,7 @@ export async function PUT(
               console.error("Version creation warning:", vErr);
             }
           }
+          invalidateStorageCache(currentUser.id);
           return NextResponse.json({ program: updated });
         }
       } catch (dbErr) {
@@ -132,6 +143,9 @@ export async function DELETE(
 ) {
   const { id } = await params;
   const supabase = await createClient();
+  const {
+    data: { user: currentUser },
+  } = await supabase.auth.getUser();
 
   try {
     await supabase.from("programs").delete().eq("id", id);
@@ -140,5 +154,8 @@ export async function DELETE(
   }
 
   await deleteLocalProgram(id);
+  if (currentUser?.id) {
+    invalidateStorageCache(currentUser.id);
+  }
   return NextResponse.json({ success: true, deletedId: id });
 }

@@ -37,6 +37,7 @@ import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ModalPortal } from "@/components/ui/ModalPortal";
 import { VerifiedBadge, isTeamAccount, isVerifiedAccount } from "@/components/ui/VerifiedBadge";
 import { useUserStore } from "@/lib/store/useUserStore";
+import { optimizeAvatarImage, formatBytes } from "@/lib/utils/imageOptimizer";
 
 interface ProfileData {
   profile: {
@@ -180,6 +181,7 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   const [editCollege, setEditCollege] = useState("");
   const [editSkills, setEditSkills] = useState("");
   const [editAvatarUrl, setEditAvatarUrl] = useState("");
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -485,23 +487,45 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
     useToastStore.getState().addToast("Profile URL copied to clipboard!", "success");
   };
 
-  // Image Upload Handler (reads file as Base64 Data URL)
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Image Upload Handler (optimizes image, uploads to Supabase Storage, and sets public URL)
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      useToastStore.getState().addToast("Image size exceeds 2MB limit", "error");
-      return;
-    }
+    try {
+      setUploadingAvatar(true);
+      // 1. Optimize and compress image (square crop, WebP/JPEG, max 512x512)
+      const optimized = await optimizeAvatarImage(file);
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setEditAvatarUrl(reader.result);
+      // 2. Upload to Supabase Storage via /api/upload
+      const formData = new FormData();
+      formData.append("file", optimized.file);
+      formData.append("type", "avatar");
+
+      const uploadRes = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok || !uploadData.publicUrl) {
+        throw new Error(uploadData.error || "Failed to upload profile photo");
       }
-    };
-    reader.readAsDataURL(file);
+
+      setEditAvatarUrl(uploadData.publicUrl);
+      useToastStore
+        .getState()
+        .addToast(
+          `Photo optimized & uploaded (${formatBytes(optimized.compressedSize)}). Click Save to apply!`,
+          "success"
+        );
+    } catch (err) {
+      useToastStore
+        .getState()
+        .addToast(err instanceof Error ? err.message : "Failed to upload photo", "error");
+    } finally {
+      setUploadingAvatar(false);
+    }
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -1203,11 +1227,21 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
+                      disabled={uploadingAvatar}
                       onClick={() => fileInputRef.current?.click()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer shadow-xs"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all cursor-pointer shadow-xs"
                     >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Upload Photo</span>
+                      {uploadingAvatar ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Optimizing & Uploading...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Upload Photo</span>
+                        </>
+                      )}
                     </button>
 
                     {editAvatarUrl && (

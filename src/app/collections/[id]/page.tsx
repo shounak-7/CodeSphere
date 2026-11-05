@@ -133,6 +133,9 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
       const res = await fetch(`/api/collections/${id}`, { method: "DELETE" });
       if (res.ok) {
         setShowDeleteModal(false);
+        try {
+          sessionStorage.removeItem("codesphere_collections_cache");
+        } catch {}
         useToastStore.getState().addToast("Collection deleted successfully", "success");
         router.push("/collections");
       } else {

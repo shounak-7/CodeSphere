@@ -25,6 +25,7 @@ export interface Post {
   content: string;
   post_type: "text" | "code" | "achievement" | "question" | "update";
   code_snippet?: string;
+  media_url?: string;
   language?: string;
   tags?: string[];
   likes_count: number;
@@ -455,6 +456,19 @@ function PostCardComponent({ post, currentUserId, currentUsername, currentUserAv
       <p className="text-xs sm:text-sm text-foreground/90 whitespace-pre-wrap leading-relaxed mb-2.5 sm:mb-4">
         {post.content}
       </p>
+
+      {/* Attached Media / Image Attachment */}
+      {post.media_url && (
+        <div className="mb-2.5 sm:mb-4 rounded-xl sm:rounded-2xl overflow-hidden border border-border bg-slate-950/20 max-h-96 flex items-center justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={post.media_url}
+            alt={post.title || "Post image attachment"}
+            className="w-full max-h-96 object-contain rounded-xl hover:scale-[1.01] transition-transform duration-200"
+            loading="lazy"
+          />
+        </div>
+      )}
 
       {/* VS Code Style C Code Snippet */}
       {post.code_snippet && (
