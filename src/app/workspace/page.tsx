@@ -76,9 +76,14 @@ export default function WorkspacePage() {
   const [isExplorerOpen, setIsExplorerOpen] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(250);
   const [isDraggingExplorer, setIsDraggingExplorer] = useState(false);
-  const [terminalHeight, setTerminalHeight] = useState(260);
+  const [terminalHeight, setTerminalHeight] = useState(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      return 185;
+    }
+    return 260;
+  });
   const [batchStdin, setBatchStdin] = useState("");
-  const [mobileView, setMobileView] = useState<"files" | "editor" | "terminal">("editor");
+  const [mobileView, setMobileView] = useState<"files" | "editor">("editor");
   const [collapsedFolderIds, setCollapsedFolderIds] = useState<Set<string>>(new Set());
 
   // Word wrap preference (defaults to true on narrow mobile screens, false on desktop; persisted in localStorage)
@@ -613,9 +618,6 @@ export default function WorkspacePage() {
 
   const handleRun = () => {
     runCode(activeCode, batchStdin);
-    if (typeof window !== "undefined" && window.innerWidth < 1024) {
-      setMobileView("terminal");
-    }
   };
 
   // Keyboard shortcuts
@@ -661,7 +663,7 @@ export default function WorkspacePage() {
 
   return (
     <AppShell showSidebar={false}>
-      <div className="h-[calc(100vh-4rem)] flex overflow-hidden bg-background select-none">
+      <div className="h-full w-full flex-1 flex overflow-hidden bg-background select-none">
         {/* ========================================================= */}
         {/* 1. SLIM VS CODE-STYLE ACTIVITY BAR (48px wide)            */}
         {/* ========================================================= */}
@@ -951,42 +953,19 @@ export default function WorkspacePage() {
                     </button>
                   )}
 
-                  {/* Mobile View Switcher Pill (< lg: screens only) */}
+                  {/* Mobile Explorer Drawer Toggle (< lg: screens only) */}
                   <div className="lg:hidden flex items-center bg-secondary/80 rounded-lg sm:rounded-xl p-0.5 border border-border shrink-0">
                     <button
                       type="button"
                       onClick={() => setMobileView(mobileView === "files" ? "editor" : "files")}
-                      className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md sm:rounded-lg text-[10px] sm:text-[11px] font-semibold transition-all cursor-pointer ${
+                      className={`px-2 py-1 rounded-md sm:rounded-lg text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
                         mobileView === "files"
                           ? "bg-card text-foreground shadow-xs font-bold"
                           : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      Files
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMobileView("editor")}
-                      className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md sm:rounded-lg text-[10px] sm:text-[11px] font-semibold transition-all cursor-pointer ${
-                        mobileView === "editor"
-                          ? "bg-card text-foreground shadow-xs font-bold"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      Code
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMobileView("terminal")}
-                      className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md sm:rounded-lg text-[10px] sm:text-[11px] font-semibold transition-all flex items-center gap-1 cursor-pointer ${
-                        mobileView === "terminal"
-                          ? "bg-card text-foreground shadow-xs font-bold"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      <span>Output</span>
-                      {isRunning && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />}
-                      {executionStatus === "error" && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
+                      <FileCode className="w-3.5 h-3.5 text-primary" />
+                      <span>Files</span>
                     </button>
                   </div>
                 </div>
@@ -1094,10 +1073,9 @@ export default function WorkspacePage() {
                 </div>
               </div>
 
-              {/* EDITOR & INTERACTIVE TERMINAL VERTICAL CANVAS */}
-              {/* Desktop layout: editor on top, terminal on bottom */}
-              <div className="hidden lg:flex flex-1 flex-col overflow-hidden relative">
-                <div className="flex-1 overflow-hidden bg-card">
+              {/* EDITOR & INTERACTIVE TERMINAL RESPONSIVE CANVAS */}
+              <div className="flex-1 flex flex-col overflow-hidden relative">
+                <div className="flex-1 overflow-hidden bg-card min-h-0">
                   <CodeEditor
                     code={activeCode}
                     onChange={(val) => setActiveCode(val || "")}
@@ -1124,42 +1102,6 @@ export default function WorkspacePage() {
                   batchStdin={batchStdin}
                   onBatchStdinChange={setBatchStdin}
                 />
-              </div>
-
-              {/* Mobile / Tablet Responsive Mode (< lg:) */}
-              <div className="lg:hidden flex-1 flex flex-col overflow-hidden relative">
-                {(mobileView === "editor" || mobileView === "files") && (
-                  <div className="flex-1 h-full overflow-hidden bg-card">
-                    <CodeEditor
-                      code={activeCode}
-                      onChange={(val) => setActiveCode(val || "")}
-                      wordWrap={wordWrap ? "on" : "off"}
-                    />
-                  </div>
-                )}
-
-                {mobileView === "terminal" && (
-                  <div className="flex-1 h-full overflow-hidden bg-card flex flex-col">
-                    <UnifiedTerminal
-                      stdout={stdout}
-                      stderr={stderr}
-                      terminalEntries={terminalEntries}
-                      problems={problems}
-                      isRunning={isRunning}
-                      status={executionStatus}
-                      exitCode={exitCode}
-                      durationMs={durationMs}
-                      height="100%"
-                      onClear={clearTerminal}
-                      onRun={handleRun}
-                      onSendInput={sendInput}
-                      onSendEof={sendEof}
-                      onKill={killSession}
-                      batchStdin={batchStdin}
-                      onBatchStdinChange={setBatchStdin}
-                    />
-                  </div>
-                )}
               </div>
             </>
           ) : (

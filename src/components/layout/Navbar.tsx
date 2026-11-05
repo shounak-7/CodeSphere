@@ -301,7 +301,7 @@ export function Navbar({ onToggleSidebar }: NavbarProps) {
   const latestUnread = notifications.find((n) => !n.is_read);
 
   return (
-    <header className="sticky top-0 z-50 w-full h-14 sm:h-16 flex-shrink-0 border-b border-border bg-white dark:bg-[#090d16] shadow-xs select-none">
+    <header className="sticky top-0 z-50 w-full h-14 sm:h-16 flex-shrink-0 border-b border-border bg-white dark:bg-[#090d16] shadow-xs select-none overscroll-none">
       <div className="flex h-14 sm:h-16 items-center justify-between px-2 sm:px-6">
         {/* Left: Mobile & Tablet hamburger + Brand */}
         <div className="flex items-center gap-1 sm:gap-3 shrink-0">

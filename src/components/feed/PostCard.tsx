@@ -564,16 +564,27 @@ function PostCardComponent({ post, currentUserId, currentUsername, currentUserAv
                 key={c.id}
                 className="p-3 rounded-xl bg-secondary/40 border border-border/60 text-xs flex items-start justify-between gap-3"
               >
-                <div className="flex items-start gap-2.5">
-                  <UserAvatar
-                    src={c.author?.avatar_url}
-                    alt={c.author?.full_name || "Commenter"}
-                    size="xs"
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="font-bold text-foreground">@{c.author?.username || "coder"}</span>
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <Link
+                    href={`/profile/${c.author?.username || "coder"}`}
+                    className="shrink-0 group/avatar cursor-pointer"
+                    title={`View @${c.author?.username || "coder"}'s profile`}
+                  >
+                    <UserAvatar
+                      src={c.author?.avatar_url}
+                      alt={c.author?.full_name || "Commenter"}
+                      size="xs"
+                      className="mt-0.5 group-hover/avatar:ring-2 group-hover/avatar:ring-primary transition-all"
+                    />
+                  </Link>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                      <Link
+                        href={`/profile/${c.author?.username || "coder"}`}
+                        className="font-bold text-foreground hover:text-primary transition-colors cursor-pointer"
+                      >
+                        @{c.author?.username || "coder"}
+                      </Link>
                       {isVerifiedAccount(c.author) && (
                         <VerifiedBadge size="sm" isTeam={isTeamAccount(c.author?.username)} />
                       )}

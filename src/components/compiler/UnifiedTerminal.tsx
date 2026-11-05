@@ -86,10 +86,13 @@ export function UnifiedTerminal({
     }
   }, [stdout, stderr, terminalEntries, isCollapsed, activeTab]);
 
-  // Keep interactive scanf input focused when running
+  // Keep interactive scanf input focused and uncollapse terminal when running
   useEffect(() => {
-    if (isRunning && activeTab === "terminal") {
-      setTimeout(() => inputRef.current?.focus(), 60);
+    if (isRunning) {
+      setIsCollapsed(false);
+      if (activeTab === "terminal") {
+        setTimeout(() => inputRef.current?.focus(), 60);
+      }
     }
   }, [isRunning, activeTab]);
 

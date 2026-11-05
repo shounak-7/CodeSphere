@@ -40,9 +40,9 @@ export function AppShell({
   const shouldShowBottomNav = showBottomNav !== undefined ? showBottomNav : showSidebar;
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
+    <div className="h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full flex flex-col bg-background text-foreground overflow-hidden overscroll-none">
       <Navbar onToggleSidebar={() => setSidebarOpen((prev) => !prev)} />
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative min-h-0">
         <Sidebar
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
@@ -50,7 +50,10 @@ export function AppShell({
         />
         <main
           className={cn(
-            "flex-1 overflow-y-auto overflow-x-hidden min-w-0",
+            "flex-1 min-w-0 min-h-0",
+            pathname === "/workspace"
+              ? "overflow-hidden flex flex-col"
+              : "overflow-y-auto overflow-x-hidden",
             shouldShowBottomNav ? "pb-16 md:pb-0" : ""
           )}
         >

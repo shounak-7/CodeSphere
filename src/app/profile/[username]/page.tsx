@@ -79,20 +79,37 @@ interface NetworkUser {
 const cachedProfileData: Record<string, ProfileData> = {};
 const cachedRelationships: Record<string, { followers: NetworkUser[]; following: NetworkUser[] }> = {};
 
+function getInitialProfileData(username: string): ProfileData | null {
+  if (cachedProfileData[username]) return cachedProfileData[username];
+  if (typeof window !== "undefined") {
+    try {
+      const saved = sessionStorage.getItem(`codesphere_profile_${username.toLowerCase()}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.profile) {
+          cachedProfileData[username] = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
 export default function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const router = useRouter();
   const { username } = use(params);
   const searchParams = useSearchParams();
   const shouldOpenEdit = searchParams.get("edit") === "true";
 
-  const [data, setData] = useState<ProfileData | null>(() => cachedProfileData[username] || null);
-  const [loading, setLoading] = useState(() => !cachedProfileData[username]);
+  const [data, setData] = useState<ProfileData | null>(() => getInitialProfileData(username));
+  const [loading, setLoading] = useState(() => !getInitialProfileData(username));
   const [activeTab, setActiveTab] = useState<"posts" | "programs" | "collections">("posts");
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowedBy, setIsFollowedBy] = useState(false);
   const [isHoveringFollow, setIsHoveringFollow] = useState(false);
-  const [followersCount, setFollowersCount] = useState(() => cachedProfileData[username]?.stats?.followersCount || 0);
-  const [followingCount, setFollowingCount] = useState(() => cachedProfileData[username]?.stats?.followingCount || 0);
+  const [followersCount, setFollowersCount] = useState(() => getInitialProfileData(username)?.stats?.followersCount || 0);
+  const [followingCount, setFollowingCount] = useState(() => getInitialProfileData(username)?.stats?.followingCount || 0);
   const storeUser = useUserStore((s) => s.user);
   const storeProfile = useUserStore((s) => s.profile);
   const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(() => {
@@ -142,6 +159,12 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
         if (resData.profile.username) {
           cachedProfileData[resData.profile.username] = resData;
         }
+        try {
+          sessionStorage.setItem(`codesphere_profile_${username.toLowerCase()}`, JSON.stringify(resData));
+          if (resData.profile.username) {
+            sessionStorage.setItem(`codesphere_profile_${resData.profile.username.toLowerCase()}`, JSON.stringify(resData));
+          }
+        } catch {}
         setData(resData);
         setIsFollowing(Boolean(resData.isFollowing));
         setIsFollowedBy(Boolean(resData.isFollowedBy));

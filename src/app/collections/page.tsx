@@ -59,9 +59,26 @@ const FOLDER_GRADIENTS = [
 
 let cachedCollections: Collection[] | null = null;
 
+function getInitialCollections(): Collection[] {
+  if (cachedCollections && cachedCollections.length > 0) return cachedCollections;
+  if (typeof window !== "undefined") {
+    try {
+      const saved = sessionStorage.getItem("codesphere_collections_cache");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cachedCollections = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return [];
+}
+
 export default function CollectionsPage() {
-  const [collections, setCollections] = useState<Collection[]>(() => cachedCollections || []);
-  const [loading, setLoading] = useState(() => !cachedCollections);
+  const [collections, setCollections] = useState<Collection[]>(getInitialCollections);
+  const [loading, setLoading] = useState(() => !cachedCollections || cachedCollections.length === 0);
   const [search, setSearch] = useState("");
   const user = useUserStore((s) => s.user);
   const profile = useUserStore((s) => s.profile);
@@ -92,7 +109,7 @@ export default function CollectionsPage() {
   const [loadingWorkspace, setLoadingWorkspace] = useState(false);
 
   const fetchCollections = async () => {
-    if (!cachedCollections) {
+    if (!cachedCollections || cachedCollections.length === 0) {
       setLoading(true);
     }
     try {
@@ -101,6 +118,9 @@ export default function CollectionsPage() {
       if (Array.isArray(data.collections)) {
         setCollections(data.collections);
         cachedCollections = data.collections;
+        try {
+          sessionStorage.setItem("codesphere_collections_cache", JSON.stringify(data.collections));
+        } catch {}
       }
     } finally {
       setLoading(false);

@@ -19,7 +19,6 @@ export async function GET() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  let supaPrograms: any[] = [];
   // Try fetching from Supabase first
   if (user) {
     try {
@@ -30,7 +29,10 @@ export async function GET() {
         .order("updated_at", { ascending: false });
 
       if (!error && programs && programs.length > 0) {
-        supaPrograms = programs;
+        return NextResponse.json(
+          { programs },
+          { headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=30" } }
+        );
       }
     } catch {
       // Fall through to local store
@@ -40,16 +42,8 @@ export async function GET() {
   // Resilient local persistent fallback
   const localPrograms = await getLocalPrograms(user?.id);
 
-  // Merge so user always sees all their workspace programs
-  const combined = [...supaPrograms];
-  for (const lp of localPrograms) {
-    if (!combined.some((p) => p.id === lp.id)) {
-      combined.push(lp);
-    }
-  }
-
   return NextResponse.json(
-    { programs: combined },
+    { programs: localPrograms },
     { headers: { "Cache-Control": "private, max-age=5, stale-while-revalidate=30" } }
   );
 }
