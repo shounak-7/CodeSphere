@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { FileCode, X, Plus, Edit2, Save, Copy, ChevronLeft, ChevronRight } from "lucide-react";
-import { Program } from "@/lib/store/useWorkspaceStore";
+import { FileCode, X, Plus, Edit2, Save, Copy, ChevronLeft, ChevronRight, Pin } from "lucide-react";
+import { Program, useWorkspaceStore } from "@/lib/store/useWorkspaceStore";
 import { useToastStore } from "@/lib/store/useToastStore";
 
 interface TabContextMenu {
@@ -41,6 +41,9 @@ export function EditorTabsBar({
   const [contextMenu, setContextMenu] = useState<TabContextMenu | null>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const pinnedItemIds = useWorkspaceStore((s) => s.pinnedItemIds) || [];
+  const togglePinItem = useWorkspaceStore((s) => s.togglePinItem);
 
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -211,6 +214,12 @@ export function EditorTabsBar({
                 <span className="truncate max-w-[130px] sm:max-w-[180px]">{prog.title}</span>
               )}
 
+              {pinnedItemIds.includes(prog.id) && (
+                <span title="Pinned file">
+                  <Pin className="w-2.5 h-2.5 rotate-45 text-indigo-400 fill-indigo-400/30 flex-shrink-0" />
+                </span>
+              )}
+
               {/* Unsaved indicator dot */}
               {isActive && isDirty && (
                 <span
@@ -263,6 +272,25 @@ export function EditorTabsBar({
           style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
           className="fixed z-50 w-44 rounded-xl border border-border bg-card shadow-2xl p-1.5 text-xs font-medium space-y-0.5 animate-in fade-in-50 zoom-in-95 backdrop-blur-md"
         >
+          {/* Pin/Unpin Tab */}
+          <button
+            type="button"
+            onClick={() => {
+              togglePinItem(contextMenu.progId);
+              const prog = programs.find((p) => p.id === contextMenu.progId);
+              const isPinned = pinnedItemIds.includes(contextMenu.progId);
+              useToastStore.getState().addToast(
+                isPinned ? `Unpinned "${prog?.title || "file"}"` : `Pinned "${prog?.title || "file"}" to top`,
+                "info"
+              );
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-secondary cursor-pointer"
+          >
+            <Pin className="w-3.5 h-3.5 rotate-45 text-indigo-400" />
+            <span>{pinnedItemIds.includes(contextMenu.progId) ? "Unpin File" : "Pin File to Top"}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => {

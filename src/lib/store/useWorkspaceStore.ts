@@ -38,6 +38,7 @@ interface WorkspaceState {
   searchQuery: string;
   selectedCategory: string;
   selectedFolderId: string | null;
+  pinnedItemIds: string[];
 
   setPrograms: (programs: Program[]) => void;
   setFolders: (folders: Folder[]) => void;
@@ -49,11 +50,13 @@ interface WorkspaceState {
   setSearchQuery: (query: string) => void;
   setSelectedCategory: (cat: string) => void;
   setSelectedFolderId: (folderId: string | null) => void;
+  togglePinItem: (id: string) => void;
+  isItemPinned: (id: string) => boolean;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       programs: [],
       folders: [],
       activeProgram: null,
@@ -64,6 +67,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       searchQuery: "",
       selectedCategory: "All",
       selectedFolderId: null,
+      pinnedItemIds: [],
 
       setPrograms: (programs) => set({ programs }),
       setFolders: (folders) => set({ folders }),
@@ -74,16 +78,38 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           isDirty: false,
         }),
       setActiveCode: (code) =>
-        set((state) => ({
-          activeCode: code,
-          isDirty: state.activeProgram ? code !== state.activeProgram.source_code : false,
-        })),
+        set((state) => {
+          if (!state.activeProgram) return { activeCode: code };
+          const updatedActiveProgram = {
+            ...state.activeProgram,
+            source_code: code,
+            updated_at: new Date().toISOString(),
+          };
+          const updatedPrograms = state.programs.map((p) =>
+            p.id === state.activeProgram!.id ? updatedActiveProgram : p
+          );
+          return {
+            activeCode: code,
+            activeProgram: updatedActiveProgram,
+            programs: updatedPrograms,
+            isDirty: false,
+            lastSavedAt: new Date(),
+          };
+        }),
       setIsDirty: (isDirty) => set({ isDirty }),
       setIsSaving: (isSaving) => set({ isSaving }),
       setLastSavedAt: (lastSavedAt) => set({ lastSavedAt }),
       setSearchQuery: (searchQuery) => set({ searchQuery }),
       setSelectedCategory: (selectedCategory) => set({ selectedCategory }),
       setSelectedFolderId: (selectedFolderId) => set({ selectedFolderId }),
+      togglePinItem: (id: string) =>
+        set((state) => {
+          const current = state.pinnedItemIds || [];
+          const exists = current.includes(id);
+          const next = exists ? current.filter((item) => item !== id) : [...current, id];
+          return { pinnedItemIds: next };
+        }),
+      isItemPinned: (id: string) => Boolean(get().pinnedItemIds?.includes(id)),
     }),
     {
       name: "codesphere_workspace_cache",
@@ -93,6 +119,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         folders: state.folders,
         activeProgram: state.activeProgram,
         activeCode: state.activeCode,
+        pinnedItemIds: state.pinnedItemIds,
       }),
     }
   )

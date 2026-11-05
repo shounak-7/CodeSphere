@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import {
   Folder as FolderIcon,
   FolderOpen,
@@ -19,8 +19,9 @@ import {
   CornerDownRight,
   FolderInput,
   Sparkles,
+  Pin,
 } from "lucide-react";
-import { Program, Folder } from "@/lib/store/useWorkspaceStore";
+import { Program, Folder, useWorkspaceStore } from "@/lib/store/useWorkspaceStore";
 import { useToastStore } from "@/lib/store/useToastStore";
 
 interface ContextMenuState {
@@ -44,6 +45,7 @@ interface WorkspaceExplorerTreeProps {
   onDeleteProgram: (p: Program) => void;
   onDeleteFolder: (f: Folder) => void;
   onMoveProgram: (programId: string, targetFolderId: string | null) => Promise<void>;
+  onMoveFolder?: (folderId: string, targetParentId: string | null) => Promise<void>;
   onDuplicateProgram: (p: Program) => void;
   onToggleFavorite: (p: Program) => void;
   onToggleVisibility: (p: Program) => void;
@@ -64,6 +66,7 @@ export function WorkspaceExplorerTree({
   onDeleteProgram,
   onDeleteFolder,
   onMoveProgram,
+  onMoveFolder,
   onDuplicateProgram,
   onToggleFavorite,
   onToggleVisibility,
@@ -71,12 +74,17 @@ export function WorkspaceExplorerTree({
 }: WorkspaceExplorerTreeProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null | "root">(null);
-  const [draggedFileId, setDraggedFileId] = useState<string | null>(null);
+  const [draggedItem, setDraggedItem] = useState<{ id: string; type: "file" | "folder"; title?: string } | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const treeContainerRef = useRef<HTMLDivElement | null>(null);
+  const dragCountersRef = useRef<Record<string, number>>({});
+  const folderExpandTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const pinnedItemIds = useWorkspaceStore((s) => s.pinnedItemIds) || [];
+  const togglePinItem = useWorkspaceStore((s) => s.togglePinItem);
 
   // Close context menu on outside click or escape
   useEffect(() => {
@@ -104,6 +112,7 @@ export function WorkspaceExplorerTree({
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", handleScrollOrResize);
       window.removeEventListener("scroll", handleScrollOrResize, true);
+      if (folderExpandTimerRef.current) clearTimeout(folderExpandTimerRef.current);
     };
   }, []);
 
@@ -134,7 +143,7 @@ export function WorkspaceExplorerTree({
     }
   };
 
-  // Open menu on three-dot button click: toggles close if reclicking the same item
+  // Open menu on three-dot button click
   const openMenuForButton = (
     e: React.MouseEvent<HTMLButtonElement>,
     type: "file" | "folder",
@@ -142,15 +151,14 @@ export function WorkspaceExplorerTree({
   ) => {
     e.stopPropagation();
 
-    // Toggle close if already open on this exact item
     if (contextMenu && contextMenu.item && "id" in contextMenu.item && contextMenu.item.id === item.id) {
       setContextMenu(null);
       return;
     }
 
     const btnRect = e.currentTarget.getBoundingClientRect();
-    const menuWidth = 192; // w-48 is 12rem = 192px
-    const menuHeight = type === "file" ? 270 : 170;
+    const menuWidth = 192;
+    const menuHeight = type === "file" ? 300 : 200;
 
     let x = btnRect.right - menuWidth;
     if (x < 8) x = btnRect.left;
@@ -171,7 +179,7 @@ export function WorkspaceExplorerTree({
     });
   };
 
-  // Open menu on right-click: appears EXACTLY at the mouse position where right-clicked!
+  // Open menu on right-click
   const openMenuOnRowContextMenu = (
     e: React.MouseEvent<HTMLDivElement>,
     type: "file" | "folder",
@@ -181,9 +189,8 @@ export function WorkspaceExplorerTree({
     e.stopPropagation();
 
     const menuWidth = 192;
-    const menuHeight = type === "file" ? 270 : 170;
+    const menuHeight = type === "file" ? 300 : 200;
 
-    // Exact cursor position with viewport boundary guard
     let x = e.clientX;
     if (x + menuWidth > window.innerWidth - 8) {
       x = Math.max(8, e.clientX - menuWidth);
@@ -202,34 +209,83 @@ export function WorkspaceExplorerTree({
     });
   };
 
-  // Drag and Drop handlers
-  const handleDragStart = (e: React.DragEvent, fileId: string) => {
-    e.dataTransfer.setData("application/codesphere-file", fileId);
+  // -------------------------------------------------------------
+  // Drag and Drop handlers: Fluid, flicker-free, with auto-expand
+  // -------------------------------------------------------------
+  const handleDragStart = (e: React.DragEvent, id: string, type: "file" | "folder", title?: string) => {
+    e.stopPropagation();
+    e.dataTransfer.setData("application/codesphere-id", id);
+    e.dataTransfer.setData("application/codesphere-type", type);
     e.dataTransfer.effectAllowed = "move";
-    setDraggedFileId(fileId);
+    setDraggedItem({ id, type, title });
   };
 
   const handleDragEnd = () => {
-    setDraggedFileId(null);
+    setDraggedItem(null);
     setDragOverFolderId(null);
+    dragCountersRef.current = {};
+    if (folderExpandTimerRef.current) clearTimeout(folderExpandTimerRef.current);
   };
 
-  const handleFolderDragOver = (e: React.DragEvent, folderId: string | null) => {
+  const handleDragEnterTarget = (e: React.DragEvent, folderId: string | "root") => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCountersRef.current[folderId] = (dragCountersRef.current[folderId] || 0) + 1;
+    setDragOverFolderId(folderId);
+
+    // Auto-expand collapsed folders after 400ms hover
+    if (folderId !== "root" && collapsedFolderIds.has(folderId)) {
+      if (folderExpandTimerRef.current) clearTimeout(folderExpandTimerRef.current);
+      folderExpandTimerRef.current = setTimeout(() => {
+        onToggleFolder(folderId);
+      }, 400);
+    }
+  };
+
+  const handleDragOverTarget = (e: React.DragEvent, folderId: string | "root") => {
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
-    setDragOverFolderId(folderId);
+    if (dragOverFolderId !== folderId) {
+      setDragOverFolderId(folderId);
+    }
   };
 
-  const handleFolderDrop = async (e: React.DragEvent, targetFolderId: string | null) => {
+  const handleDragLeaveTarget = (e: React.DragEvent, folderId: string | "root") => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCountersRef.current[folderId] = (dragCountersRef.current[folderId] || 0) - 1;
+    if (dragCountersRef.current[folderId] <= 0) {
+      dragCountersRef.current[folderId] = 0;
+      if (dragOverFolderId === folderId) {
+        setDragOverFolderId(null);
+      }
+    }
+    if (folderExpandTimerRef.current) clearTimeout(folderExpandTimerRef.current);
+  };
+
+  const handleDropOnTarget = async (e: React.DragEvent, targetFolderId: string | null) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOverFolderId(null);
-    const fileId = e.dataTransfer.getData("application/codesphere-file") || draggedFileId;
-    if (fileId) {
-      await onMoveProgram(fileId, targetFolderId);
+    dragCountersRef.current = {};
+    if (folderExpandTimerRef.current) clearTimeout(folderExpandTimerRef.current);
+
+    const itemId = e.dataTransfer.getData("application/codesphere-id") || draggedItem?.id;
+    const itemType = e.dataTransfer.getData("application/codesphere-type") || draggedItem?.type;
+
+    if (!itemId) return;
+
+    if (itemType === "folder") {
+      if (itemId === targetFolderId) return; // Prevent cyclic self-drop
+      if (onMoveFolder) {
+        await onMoveFolder(itemId, targetFolderId);
+      }
+    } else {
+      await onMoveProgram(itemId, targetFolderId);
     }
-    setDraggedFileId(null);
+
+    setDraggedItem(null);
   };
 
   // Filter programs based on search query
@@ -238,35 +294,42 @@ export function WorkspaceExplorerTree({
     return title.toLowerCase().includes(searchQuery.toLowerCase());
   };
 
+  // -------------------------------------------------------------
   // Recursive folder renderer
-  const renderFolder = (folder: Folder, depth = 0) => {
+  // -------------------------------------------------------------
+  const renderFolder = (folder: Folder, depth = 0, isPinnedView = false) => {
     const isCollapsed = collapsedFolderIds.has(folder.id);
     const isTarget = dragOverFolderId === folder.id;
     const isEditing = editingItemId === folder.id;
+    const isDragging = draggedItem?.id === folder.id;
+    const isPinned = pinnedItemIds.includes(folder.id);
 
-    // Direct files in this folder
     const folderFiles = programs.filter(
       (p) => p.folder_id === folder.id && matchesSearch(p.title)
     );
-
-    // Subfolders of this folder
     const subFolders = folders.filter((f) => f.parent_id === folder.id);
 
     return (
-      <div key={folder.id} className="select-none">
+      <div key={`folder-${folder.id}-${isPinnedView ? "pinned" : "tree"}`} className="select-none">
         {/* Folder row */}
         <div
+          draggable={!isEditing}
+          onDragStart={(e) => handleDragStart(e, folder.id, "folder", folder.name)}
+          onDragEnd={handleDragEnd}
           onContextMenu={(e) => openMenuOnRowContextMenu(e, "folder", folder)}
-          onDragOver={(e) => handleFolderDragOver(e, folder.id)}
-          onDragLeave={() => {
-            if (dragOverFolderId === folder.id) setDragOverFolderId(null);
-          }}
-          onDrop={(e) => handleFolderDrop(e, folder.id)}
+          onDragEnter={(e) => handleDragEnterTarget(e, folder.id)}
+          onDragOver={(e) => handleDragOverTarget(e, folder.id)}
+          onDragLeave={(e) => handleDragLeaveTarget(e, folder.id)}
+          onDrop={(e) => handleDropOnTarget(e, folder.id)}
           onClick={() => onToggleFolder(folder.id)}
           style={{ paddingLeft: `${depth * 14 + 8}px` }}
           className={`group flex items-center justify-between py-1 sm:py-1.5 pr-1.5 sm:pr-2 rounded-md sm:rounded-lg text-[11px] sm:text-xs cursor-pointer transition-all border ${
             isTarget
-              ? "bg-primary/20 border-primary shadow-xs"
+              ? "bg-indigo-500/20 text-indigo-300 border-indigo-500 ring-2 ring-indigo-500/40 shadow-sm scale-[1.01]"
+              : isDragging
+              ? "opacity-40 border-dashed border-indigo-400"
+              : isPinned && isPinnedView
+              ? "border-l-2 border-l-indigo-500 bg-indigo-500/[0.06] text-foreground hover:bg-indigo-500/[0.12]"
               : "border-transparent text-foreground hover:bg-secondary/70"
           }`}
         >
@@ -299,10 +362,39 @@ export function WorkspaceExplorerTree({
             ) : (
               <span className="font-medium truncate text-foreground/90">{folder.name}</span>
             )}
+
+            {isPinned && (
+              <span title="Pinned Folder">
+                <Pin className="w-3 h-3 text-indigo-400 rotate-45 fill-indigo-400/30 flex-shrink-0" />
+              </span>
+            )}
+
+            {isTarget && (
+              <span className="text-[10px] text-indigo-400 font-semibold flex items-center gap-1 ml-auto shrink-0 animate-pulse">
+                <FolderInput className="w-3 h-3" /> Drop inside
+              </span>
+            )}
           </div>
 
           {/* Quick hover actions */}
           <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 flex-shrink-0 transition-opacity">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePinItem(folder.id);
+                useToastStore.getState().addToast(
+                  isPinned ? `Unpinned "${folder.name}"` : `Pinned "${folder.name}" to top`,
+                  "info"
+                );
+              }}
+              className={`p-1 rounded hover:bg-muted-foreground/20 transition-all ${
+                isPinned ? "text-indigo-400" : "text-muted-foreground hover:text-indigo-400"
+              }`}
+              title={isPinned ? "Unpin folder" : "Pin folder to top"}
+            >
+              <Pin className={`w-3 h-3 rotate-45 ${isPinned ? "fill-indigo-400/30" : ""}`} />
+            </button>
             <button
               type="button"
               onClick={(e) => {
@@ -337,21 +429,22 @@ export function WorkspaceExplorerTree({
         </div>
 
         {/* Folder Children (Files & Subfolders) */}
-        {!isCollapsed && (
-          <div className="space-y-0.5">
-            {/* Render nested subfolders */}
+        {!isCollapsed && !isPinnedView && (
+          <div
+            onDragEnter={(e) => handleDragEnterTarget(e, folder.id)}
+            onDragOver={(e) => handleDragOverTarget(e, folder.id)}
+            onDrop={(e) => handleDropOnTarget(e, folder.id)}
+            className="space-y-0.5"
+          >
             {subFolders.map((sub) => renderFolder(sub, depth + 1))}
-
-            {/* Render files in this folder */}
             {folderFiles.map((file) => renderFile(file, depth + 1))}
 
-            {/* Empty state for folder */}
             {folderFiles.length === 0 && subFolders.length === 0 && (
               <div
                 style={{ paddingLeft: `${(depth + 1) * 14 + 18}px` }}
                 className="py-1 text-[11px] text-muted-foreground/60 italic"
               >
-                (Empty folder)
+                (Empty folder - drop files here)
               </div>
             )}
           </div>
@@ -360,23 +453,36 @@ export function WorkspaceExplorerTree({
     );
   };
 
+  // -------------------------------------------------------------
   // Render individual file row
-  const renderFile = (file: Program, depth = 0) => {
+  // -------------------------------------------------------------
+  const renderFile = (file: Program, depth = 0, isPinnedView = false) => {
     const isActive = activeProgram?.id === file.id;
     const isEditing = editingItemId === file.id;
+    const isDragging = draggedItem?.id === file.id;
+    const isPinned = pinnedItemIds.includes(file.id);
 
     return (
       <div
-        key={file.id}
+        key={`file-${file.id}-${isPinnedView ? "pinned" : "tree"}`}
         draggable={!isEditing}
-        onDragStart={(e) => handleDragStart(e, file.id)}
+        onDragStart={(e) => handleDragStart(e, file.id, "file", file.title)}
         onDragEnd={handleDragEnd}
+        // Dropping onto a file inside a folder drops into that folder!
+        onDragEnter={(e) => handleDragEnterTarget(e, file.folder_id || "root")}
+        onDragOver={(e) => handleDragOverTarget(e, file.folder_id || "root")}
+        onDragLeave={(e) => handleDragLeaveTarget(e, file.folder_id || "root")}
+        onDrop={(e) => handleDropOnTarget(e, file.folder_id || null)}
         onClick={() => onSelectProgram(file)}
         onContextMenu={(e) => openMenuOnRowContextMenu(e, "file", file)}
         style={{ paddingLeft: `${depth * 14 + 12}px` }}
         className={`group flex items-center justify-between py-1 sm:py-1.5 pr-1.5 sm:pr-2 rounded-md sm:rounded-lg text-[11px] sm:text-xs cursor-pointer transition-all border ${
           isActive
             ? "bg-primary/15 text-primary border-primary/30 font-semibold shadow-xs"
+            : isDragging
+            ? "opacity-40 border-dashed border-primary"
+            : isPinned && isPinnedView
+            ? "border-l-2 border-l-indigo-500 bg-indigo-500/[0.06] text-foreground hover:bg-indigo-500/[0.12]"
             : "border-transparent text-foreground hover:bg-secondary/70"
         }`}
       >
@@ -404,12 +510,37 @@ export function WorkspaceExplorerTree({
           ) : (
             <span className="truncate">{file.title}</span>
           )}
+
+          {isPinned && (
+            <span title="Pinned File">
+              <Pin className="w-3 h-3 text-indigo-400 rotate-45 fill-indigo-400/30 flex-shrink-0" />
+            </span>
+          )}
         </div>
 
         {/* Badges & Actions */}
         <div className="flex items-center gap-1 flex-shrink-0">
           {file.is_favorite && <Star className="w-3 h-3 fill-amber-400 text-amber-400" />}
           {file.visibility === "public" && <Globe className="w-3 h-3 text-emerald-400" />}
+
+          {/* Quick Pin Toggle on Hover */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePinItem(file.id);
+              useToastStore.getState().addToast(
+                isPinned ? `Unpinned "${file.title}"` : `Pinned "${file.title}" to top`,
+                "info"
+              );
+            }}
+            className={`p-1 rounded hover:bg-muted-foreground/20 transition-all ${
+              isPinned ? "text-indigo-400" : "text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-indigo-400"
+            }`}
+            title={isPinned ? "Unpin file" : "Pin file to top"}
+          >
+            <Pin className={`w-3 h-3 rotate-45 ${isPinned ? "fill-indigo-400/30" : ""}`} />
+          </button>
 
           {/* Context menu button on hover */}
           <button
@@ -425,17 +556,28 @@ export function WorkspaceExplorerTree({
     );
   };
 
-  // Top level folders (parent_id === null or undefined)
+  // Top level folders & files
   const rootFolders = folders.filter((f) => !f.parent_id);
-
-  // Top level files (folder_id === null or undefined)
   const rootFiles = programs.filter(
     (p) => (!p.folder_id || !folders.some((f) => f.id === p.folder_id)) && matchesSearch(p.title)
   );
 
+  // Pinned items
+  const pinnedFolders = useMemo(() => folders.filter((f) => pinnedItemIds.includes(f.id)), [folders, pinnedItemIds]);
+  const pinnedFiles = useMemo(
+    () => programs.filter((p) => pinnedItemIds.includes(p.id) && matchesSearch(p.title)),
+    [programs, pinnedItemIds, searchQuery]
+  );
+  const pinnedCount = pinnedFolders.length + pinnedFiles.length;
+
   return (
     <div
       ref={treeContainerRef}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(e) => handleDropOnTarget(e, null)}
       onContextMenu={(e) => {
         e.preventDefault();
         const menuWidth = 192;
@@ -454,34 +596,51 @@ export function WorkspaceExplorerTree({
           item: null,
         });
       }}
-      className="flex-1 overflow-y-auto px-1 sm:px-1.5 py-1.5 sm:py-2 space-y-0.5 select-none relative"
+      className="flex-1 overflow-y-auto px-1 sm:px-1.5 py-1.5 sm:py-2 space-y-0.5 select-none relative scrollbar-thin"
     >
       {/* Root Drop Target Banner when Dragging */}
-      {draggedFileId && (
+      {draggedItem && (
         <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            setDragOverFolderId("root");
-          }}
-          onDragLeave={() => {
-            if (dragOverFolderId === "root") setDragOverFolderId(null);
-          }}
-          onDrop={(e) => handleFolderDrop(e, null)}
-          className={`p-2.5 rounded-xl border-2 border-dashed text-center text-xs font-semibold transition-all mb-2 cursor-pointer ${
+          onDragEnter={(e) => handleDragEnterTarget(e, "root")}
+          onDragOver={(e) => handleDragOverTarget(e, "root")}
+          onDragLeave={(e) => handleDragLeaveTarget(e, "root")}
+          onDrop={(e) => handleDropOnTarget(e, null)}
+          className={`p-2 rounded-xl border-2 border-dashed text-center text-xs font-semibold transition-all mb-2 cursor-pointer ${
             dragOverFolderId === "root"
-              ? "border-primary bg-primary/20 text-primary scale-102"
-              : "border-border text-muted-foreground hover:border-primary/50"
+              ? "border-indigo-500 bg-indigo-500/20 text-indigo-400 scale-[1.01] shadow-md ring-2 ring-indigo-500/30"
+              : "border-border/80 text-muted-foreground hover:border-indigo-500/50 hover:bg-indigo-500/[0.04]"
           }`}
         >
-          <span>Drop here to move to Root (Unfiled)</span>
+          <span className="flex items-center justify-center gap-1.5">
+            <CornerDownRight className="w-3.5 h-3.5" />
+            Drop here to move to Root (Unfiled)
+          </span>
         </div>
       )}
 
-      {/* Render Root Folders Tree */}
+      {/* PINNED QUICK ACCESS SECTION */}
+      {pinnedCount > 0 && !searchQuery.trim() && (
+        <div className="mb-2.5 pb-2 border-b border-border/60">
+          <div className="flex items-center justify-between px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">
+            <span className="flex items-center gap-1.5 text-indigo-400">
+              <Pin className="w-3 h-3 rotate-45 text-indigo-400 fill-indigo-400/30" />
+              Pinned Items
+            </span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-secondary font-mono text-muted-foreground">
+              {pinnedCount}
+            </span>
+          </div>
+          <div className="space-y-0.5 mt-0.5">
+            {pinnedFolders.map((f) => renderFolder(f, 0, true))}
+            {pinnedFiles.map((file) => renderFile(file, 0, true))}
+          </div>
+        </div>
+      )}
+
+      {/* Render Main Root Folders Tree */}
       {rootFolders.map((f) => renderFolder(f, 0))}
 
-      {/* Render Root Files */}
+      {/* Render Main Root Files */}
       {rootFiles.map((f) => renderFile(f, 0))}
 
       {/* Empty State when no files match */}
@@ -511,7 +670,7 @@ export function WorkspaceExplorerTree({
         </div>
       )}
 
-      {/* CONTEXT MENU POPUP (Right-Click & Three-Dot Menu) - Liquid Glass within Sidebar Boundaries */}
+      {/* CONTEXT MENU POPUP (Right-Click & Three-Dot Menu) */}
       {contextMenu && (
         <div
           ref={menuRef}
@@ -521,6 +680,25 @@ export function WorkspaceExplorerTree({
           {/* FILE ACTIONS */}
           {contextMenu.type === "file" && contextMenu.item && (
             <>
+              {/* Pin File Toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  const p = contextMenu.item as Program;
+                  setContextMenu(null);
+                  togglePinItem(p.id);
+                  const isPinned = pinnedItemIds.includes(p.id);
+                  useToastStore.getState().addToast(
+                    isPinned ? `Unpinned "${p.title}"` : `Pinned "${p.title}" to top`,
+                    "info"
+                  );
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-secondary cursor-pointer"
+              >
+                <Pin className="w-3.5 h-3.5 rotate-45 text-indigo-400" />
+                <span>{pinnedItemIds.includes((contextMenu.item as Program).id) ? "Unpin File" : "Pin File to Top"}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -624,6 +802,25 @@ export function WorkspaceExplorerTree({
           {/* FOLDER ACTIONS */}
           {contextMenu.type === "folder" && contextMenu.item && (
             <>
+              {/* Pin Folder Toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  const f = contextMenu.item as Folder;
+                  setContextMenu(null);
+                  togglePinItem(f.id);
+                  const isPinned = pinnedItemIds.includes(f.id);
+                  useToastStore.getState().addToast(
+                    isPinned ? `Unpinned "${f.name}"` : `Pinned "${f.name}" to top`,
+                    "info"
+                  );
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-secondary cursor-pointer"
+              >
+                <Pin className="w-3.5 h-3.5 rotate-45 text-indigo-400" />
+                <span>{pinnedItemIds.includes((contextMenu.item as Folder).id) ? "Unpin Folder" : "Pin Folder to Top"}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -661,6 +858,22 @@ export function WorkspaceExplorerTree({
                 <Edit2 className="w-3.5 h-3.5 text-primary" />
                 <span>Rename Folder</span>
               </button>
+
+              {/* Move folder to Root if inside another folder */}
+              {(contextMenu.item as Folder).parent_id && onMoveFolder && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const f = contextMenu.item as Folder;
+                    setContextMenu(null);
+                    onMoveFolder(f.id, null);
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-secondary cursor-pointer"
+                >
+                  <CornerDownRight className="w-3.5 h-3.5 text-primary" />
+                  <span>Move to Root Directory</span>
+                </button>
+              )}
 
               <div className="h-px bg-border my-1" />
 

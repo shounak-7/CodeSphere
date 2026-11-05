@@ -208,24 +208,41 @@ export default function WorkspacePage() {
     return () => clearInterval(heartbeat);
   }, []);
 
-  // Autosave implementation with debouncing (2 seconds after typing stops)
+  // Non-blocking background server sync for instant auto-save (0ms local save occurs synchronously on every keystroke)
   useEffect(() => {
-    if (!activeProgram || !isDirty) return;
+    if (!activeProgram) return;
 
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
     }
 
+    // Debounced silent background sync to cloud database without interrupting typing
     saveTimerRef.current = setTimeout(() => {
       handleSave(false);
-    }, 2000);
+    }, 600);
 
     return () => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
       }
     };
-  }, [activeCode, isDirty]);
+  }, [activeCode, activeProgram?.id]);
+
+  // Window beforeunload sync guard
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (activeProgram && activeCode) {
+        navigator.sendBeacon?.(
+          `/api/programs/${activeProgram.id}`,
+          new Blob([JSON.stringify({ title: activeProgram.title, source_code: activeCode })], {
+            type: "application/json",
+          })
+        );
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [activeProgram, activeCode]);
 
   // Explorer horizontal resize dragging
   const handleExplorerMouseDownResize = (e: React.MouseEvent) => {
@@ -283,21 +300,26 @@ export default function WorkspacePage() {
   const handleSave = async (showFeedback = true) => {
     if (!activeProgram) return;
     setIsSaving(true);
+    const codeToSave = activeCode;
+    const programId = activeProgram.id;
     try {
-      const res = await fetch(`/api/programs/${activeProgram.id}`, {
+      const res = await fetch(`/api/programs/${programId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: activeProgram.title,
-          source_code: activeCode,
+          source_code: codeToSave,
         }),
       });
       const data = await res.json();
       if (res.ok && data.program) {
         setIsDirty(false);
         setLastSavedAt(new Date());
-        setPrograms(programs.map((p) => (p.id === data.program.id ? data.program : p)));
-        setActiveProgram(data.program);
+        // Preserve whatever the user is actively typing right now! Never overwrite live activeCode!
+        setPrograms(programs.map((p) => (p.id === data.program.id ? { ...data.program, source_code: activeCode } : p)));
+        if (activeProgram.id === data.program.id) {
+          setActiveProgram({ ...data.program, source_code: activeCode });
+        }
         if (showFeedback) {
           useToastStore.getState().addToast("Program saved successfully", "success");
         }
@@ -413,6 +435,29 @@ export default function WorkspacePage() {
       }
     } catch {
       useToastStore.getState().addToast("Failed to move file", "error");
+    }
+  };
+
+  // Move folder into another folder or root
+  const handleMoveFolder = async (folderId: string, targetParentId: string | null) => {
+    if (folderId === targetParentId) return;
+    try {
+      const res = await fetch(`/api/folders/${folderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parent_id: targetParentId }),
+      });
+      if (res.ok) {
+        setFolders(
+          folders.map((f) => (f.id === folderId ? { ...f, parent_id: targetParentId } : f))
+        );
+        const targetFolderName = targetParentId
+          ? folders.find((f) => f.id === targetParentId)?.name || "Folder"
+          : "Root Directory";
+        useToastStore.getState().addToast(`Moved folder to ${targetFolderName}`, "success");
+      }
+    } catch {
+      useToastStore.getState().addToast("Failed to move folder", "error");
     }
   };
 
@@ -829,6 +874,7 @@ export default function WorkspacePage() {
               onDeleteProgram={handleDeleteProgram}
               onDeleteFolder={handleDeleteFolder}
               onMoveProgram={handleMoveProgram}
+              onMoveFolder={handleMoveFolder}
               onDuplicateProgram={handleDuplicateProgram}
               onToggleFavorite={handleToggleFavorite}
               onToggleVisibility={handleToggleVisibility}
@@ -924,6 +970,7 @@ export default function WorkspacePage() {
             onDeleteProgram={handleDeleteProgram}
             onDeleteFolder={handleDeleteFolder}
             onMoveProgram={handleMoveProgram}
+            onMoveFolder={handleMoveFolder}
             onDuplicateProgram={handleDuplicateProgram}
             onToggleFavorite={handleToggleFavorite}
             onToggleVisibility={handleToggleVisibility}
