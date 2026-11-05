@@ -50,7 +50,18 @@ export async function GET(request: Request) {
 
     const { data: posts, error } = await query;
 
-    if (!error && posts && posts.length > 0) {
+    if (!error && posts) {
+      if (posts.length === 0) {
+        return NextResponse.json(
+          { posts: [] },
+          {
+            headers: {
+              "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
+            },
+          }
+        );
+      }
+
       let bookmarkedIds = new Set<string>();
       let likedIds = new Set<string>();
       const postLikesCountMap = new Map<string, number>();
@@ -106,7 +117,7 @@ export async function GET(request: Request) {
         { posts: formattedPosts },
         {
           headers: {
-            "Cache-Control": "private, max-age=3, stale-while-revalidate=15",
+            "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
           },
         }
       );
