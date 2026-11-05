@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getLocalBookmarks, toggleLocalBookmark, isUserVerified } from "@/lib/storage/communityStore";
-import { isTeamAccount } from "@/lib/utils";
+import { isTeamAccount, extractPostMedia } from "@/lib/utils";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 const BookmarkSchema = z.object({
@@ -62,12 +62,15 @@ export async function GET(request: Request) {
 
         const postsMap = new Map(
           (postsRes.data || []).map((p: any) => {
+            const { content: cleanContent, mediaUrl } = extractPostMedia(p.content || "", (p as any).media_url);
             const likesCount = p.likes_count || 0;
             const commentsCount = p.comments_count || 0;
             return [
               p.id,
               {
                 ...p,
+                content: cleanContent,
+                media_url: mediaUrl,
                 author: p.author
                   ? {
                       ...p.author,

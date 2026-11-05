@@ -5,9 +5,10 @@ import Link from "next/link";
 import { Send, Code2, HelpCircle, Trophy, Sparkles, X, Plus, LogIn, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useToastStore } from "@/lib/store/useToastStore";
 import { optimizePostImage, formatBytes } from "@/lib/utils/imageOptimizer";
+import type { Post } from "@/components/feed/PostCard";
 
 interface PostComposerProps {
-  onPostCreated: () => void;
+  onPostCreated: (newPost?: Post) => void;
   currentUser?: { id: string; username?: string } | null;
 }
 
@@ -126,6 +127,7 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
       });
 
       if (res.ok) {
+        const data = await res.json();
         setContent("");
         setTitle("");
         setCodeSnippet("");
@@ -135,7 +137,7 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
         setShowCodeInput(false);
         setIsExpanded(false);
         useToastStore.getState().addToast("Post shared to community feed!", "success");
-        onPostCreated();
+        onPostCreated(data?.post);
       } else {
         const data = await res.json();
         useToastStore.getState().addToast(data.error || "Failed to publish post", "error");

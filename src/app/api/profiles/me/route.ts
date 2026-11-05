@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalProfileData, saveLocalProfile } from "@/lib/storage/communityStore";
-import { isTeamAccount } from "@/lib/utils";
+import { isTeamAccount, extractPostMedia } from "@/lib/utils";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 const UpdateProfileSchema = z.object({
@@ -101,19 +101,24 @@ export async function GET(request: Request) {
       const followersCount = followersCountRes.count ?? 0;
       const followingCount = followingCountRes.count ?? 0;
       const programs = userProgramsRes.data || [];
-      const posts = (userPostsRes.data || []).map((p) => ({
-        ...p,
-        author: {
-          id: supaProfile.id,
-          username: supaProfile.username,
-          full_name: supaProfile.full_name,
-          avatar_url: supaProfile.avatar_url,
-          is_verified: isProfileVerified,
-        },
-        is_liked: false,
-        likes_count: p.likes_count || 0,
-        comments_count: p.comments_count || 0,
-      }));
+      const posts = (userPostsRes.data || []).map((p) => {
+        const { content: cleanContent, mediaUrl } = extractPostMedia(p.content || "", (p as any).media_url);
+        return {
+          ...p,
+          content: cleanContent,
+          media_url: mediaUrl,
+          author: {
+            id: supaProfile.id,
+            username: supaProfile.username,
+            full_name: supaProfile.full_name,
+            avatar_url: supaProfile.avatar_url,
+            is_verified: isProfileVerified,
+          },
+          is_liked: false,
+          likes_count: p.likes_count || 0,
+          comments_count: p.comments_count || 0,
+        };
+      });
       const collections = (userCollectionsRes.data || []).map((c) => ({
         ...c,
         programs_count: c.collection_programs?.[0]?.count ?? 0,

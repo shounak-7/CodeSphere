@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalProfileData, isUserVerifiedAsync } from "@/lib/storage/communityStore";
 import { getLocalPrograms } from "@/lib/storage/workspaceStore";
-import { isTeamAccount } from "@/lib/utils";
+import { isTeamAccount, extractPostMedia } from "@/lib/utils";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 export async function GET(
@@ -137,12 +137,17 @@ export async function GET(
         }
       }
 
-      const userPosts = (postsRes.data || []).map((p) => ({
-        ...p,
-        is_liked: currentUser ? p.post_likes?.some((l: { user_id: string }) => l.user_id === currentUser.id) : false,
-        likes_count: p.post_likes?.length || p.likes_count || 0,
-        comments_count: p.comments?.length || p.comments_count || 0,
-      }));
+      const userPosts = (postsRes.data || []).map((p) => {
+        const { content: cleanContent, mediaUrl } = extractPostMedia(p.content || "", (p as any).media_url);
+        return {
+          ...p,
+          content: cleanContent,
+          media_url: mediaUrl,
+          is_liked: currentUser ? p.post_likes?.some((l: { user_id: string }) => l.user_id === currentUser.id) : false,
+          likes_count: p.post_likes?.length || p.likes_count || 0,
+          comments_count: p.comments?.length || p.comments_count || 0,
+        };
+      });
 
       const collections = (collectionsRes.data || []).map((c) => ({
         ...c,

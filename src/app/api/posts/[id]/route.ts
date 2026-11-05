@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteLocalPost } from "@/lib/storage/communityStore";
 import { deleteUserMedia, invalidateStorageCache } from "@/lib/server/storageQuota";
 
@@ -28,26 +29,31 @@ export async function DELETE(
 
   let deletedFromSupabase = false;
   try {
+    const admin = createAdminClient();
     // 1. Fetch post to check if it has media attached before deleting
-    const { data: existingPost } = await supabase
+    const { data: existingPost } = await admin
       .from("posts")
-      .select("media_url")
+      .select("id, content, author_id")
       .eq("id", id)
       .eq("author_id", userId)
       .maybeSingle();
 
-    if (existingPost?.media_url) {
-      await deleteUserMedia(userId, existingPost.media_url);
-    }
+    if (existingPost) {
+      const mediaMatch = (existingPost.content || "").match(/<!--media:(.+?)-->/);
+      if (mediaMatch && mediaMatch[1]) {
+        await deleteUserMedia(userId, mediaMatch[1]);
+      }
 
-    const { data, error } = await supabase
-      .from("posts")
-      .delete()
-      .eq("id", id)
-      .eq("author_id", userId)
-      .select("id");
-    if (!error && data && data.length > 0) {
-      deletedFromSupabase = true;
+      const { data, error } = await admin
+        .from("posts")
+        .delete()
+        .eq("id", id)
+        .eq("author_id", userId)
+        .select("id");
+
+      if (!error && data && data.length > 0) {
+        deletedFromSupabase = true;
+      }
     }
   } catch (err) {
     console.warn("Supabase post delete error, proceeding with local check:", err);

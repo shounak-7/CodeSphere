@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getLocalPosts } from "@/lib/storage/communityStore";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
+import { extractPostMedia } from "@/lib/utils";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -99,15 +100,20 @@ export async function GET(request: Request) {
     is_verified: checkIsVerified(p, verifiedData),
   }));
 
-  const enrichedPosts = posts.map((post) => ({
-    ...post,
-    author: post.author
-      ? {
-          ...post.author,
-          is_verified: checkIsVerified(post.author, verifiedData),
-        }
-      : undefined,
-  }));
+  const enrichedPosts = posts.map((post) => {
+    const { content: cleanContent, mediaUrl } = extractPostMedia(post.content || "", post.media_url);
+    return {
+      ...post,
+      content: cleanContent,
+      media_url: mediaUrl,
+      author: post.author
+        ? {
+            ...post.author,
+            is_verified: checkIsVerified(post.author, verifiedData),
+          }
+        : undefined,
+    };
+  });
 
   return NextResponse.json({
     profiles: enrichedProfiles,

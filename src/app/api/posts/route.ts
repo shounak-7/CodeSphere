@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalPosts, saveLocalPost, getLocalBookmarks, getLocalProfile, isUserVerified } from "@/lib/storage/communityStore";
-import { isTeamAccount } from "@/lib/utils";
+import { isTeamAccount, extractPostMedia } from "@/lib/utils";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 import { invalidateStorageCache } from "@/lib/server/storageQuota";
 
@@ -100,19 +100,29 @@ export async function GET(request: Request) {
         bookmarkedIds = new Set(localBookmarks.map((b) => b.target_id));
       }
 
-      const formattedPosts = posts.map((post) => ({
-        ...post,
-        author: post.author
-          ? {
-              ...post.author,
-              is_verified: checkIsVerified(post.author, verifiedData),
-            }
-          : undefined,
-        is_liked: likedIds.has(post.id),
-        is_bookmarked: bookmarkedIds.has(post.id),
-        likes_count: postLikesCountMap.has(post.id) ? postLikesCountMap.get(post.id)! : (post.likes_count || 0),
-        comments_count: post.comments_count || 0,
-      }));
+      const formattedPosts = posts.map((post) => {
+        const { content: cleanContent, mediaUrl } = extractPostMedia(
+          post.content || "",
+          (post as any).media_url
+        );
+
+        return {
+          ...post,
+          content: cleanContent,
+          media_url: mediaUrl,
+          author: post.author
+            ? {
+                ...post.author,
+                is_verified: checkIsVerified(post.author, verifiedData),
+              }
+            : undefined,
+          is_liked: likedIds.has(post.id),
+          is_bookmarked: bookmarkedIds.has(post.id),
+          is_author: user ? post.author_id === user.id : false,
+          likes_count: postLikesCountMap.has(post.id) ? postLikesCountMap.get(post.id)! : (post.likes_count || 0),
+          comments_count: post.comments_count || 0,
+        };
+      });
 
       return NextResponse.json(
         { posts: formattedPosts },
@@ -189,54 +199,76 @@ export async function POST(request: Request) {
           .maybeSingle();
 
         const finalUsername = conflict && conflict.id !== user.id
-          ? `${baseUsername.slice(0, 18)}_${user.id.substring(0, 4)}`
+          ? `${baseUsername.slice(0, 18)}_${user.id.replace(/-/g, "").substring(0, 4)}`
           : baseUsername;
 
         const fullName = user.user_metadata?.full_name || user.user_metadata?.name || emailPrefix;
         const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture || "";
 
-        await admin.from("profiles").upsert({
+        const { error: profileErr } = await admin.from("profiles").upsert({
           id: user.id,
           username: finalUsername,
           full_name: fullName,
           avatar_url: avatarUrl,
         });
+
+        if (profileErr) {
+          console.warn("Profile upsert retry with fallback username:", profileErr);
+          await admin.from("profiles").upsert({
+            id: user.id,
+            username: `coder_${user.id.replace(/-/g, "").substring(0, 8)}`,
+            full_name: fullName,
+            avatar_url: avatarUrl,
+          });
+        }
       }
 
       // 2. Prepare post insertion payload
+      // Embed media_url directly in content as marker <!--media:...--> to ensure 100% schema compatibility
+      // without failing on PGRST204 column missing error in Supabase
+      const rawContent = parsed.content.trim();
+      const finalContent = parsed.media_url
+        ? `${rawContent}\n<!--media:${parsed.media_url}-->`
+        : rawContent;
+
       const insertPayload: any = {
         author_id: user.id,
         title: parsed.title || null,
-        content: parsed.content,
+        content: finalContent,
         post_type: parsed.post_type,
         code_snippet: parsed.code_snippet || null,
-        media_url: parsed.media_url || null,
         language: parsed.language,
         program_id: parsed.program_id || null,
         tags: parsed.tags,
       };
 
-      let { data: post, error } = await admin
+      const { data: post, error } = await admin
         .from("posts")
         .insert(insertPayload)
         .select(`*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`)
         .single();
 
-      if (error && (error as any).code === "42703") {
-        // Column media_url not yet created in Supabase schema; retry insert without it
-        delete insertPayload.media_url;
-        const retry = await admin
-          .from("posts")
-          .insert(insertPayload)
-          .select(`*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`)
-          .single();
-        post = retry.data ? { ...retry.data, media_url: parsed.media_url || null } : null;
-        error = retry.error;
-      }
-
       if (post) {
         invalidateStorageCache(user.id);
-        return NextResponse.json({ post }, { status: 201 });
+        const [verifiedData] = await Promise.all([getVerifiedEntities()]);
+        const authorObj = post.author || existingProfile || authorMeta;
+        const formattedPost = {
+          ...post,
+          content: rawContent,
+          media_url: parsed.media_url || null,
+          author: authorObj
+            ? {
+                ...authorObj,
+                is_verified: checkIsVerified(authorObj, verifiedData),
+              }
+            : undefined,
+          is_liked: false,
+          is_bookmarked: false,
+          is_author: true,
+          likes_count: 0,
+          comments_count: 0,
+        };
+        return NextResponse.json({ post: formattedPost }, { status: 201 });
       }
 
       if (error) {
@@ -246,7 +278,7 @@ export async function POST(request: Request) {
       console.error("Supabase post creation exception:", dbErr);
     }
 
-    // Local store persistence fallback
+    // Local store persistence fallback only if database insert completely failed
     const localPost = await saveLocalPost({
       author_id: authorId,
       author: authorMeta,
@@ -259,8 +291,6 @@ export async function POST(request: Request) {
       program_id: parsed.program_id,
       tags: parsed.tags,
     });
-
-    return NextResponse.json({ post: localPost }, { status: 201 });
 
     return NextResponse.json({ post: localPost }, { status: 201 });
   } catch (err) {

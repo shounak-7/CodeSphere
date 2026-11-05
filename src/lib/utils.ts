@@ -33,3 +33,16 @@ export function isTeamAccount(username?: string | null): boolean {
   const clean = username.toLowerCase().trim();
   return clean === "codesphere" || clean === "team";
 }
+
+export function extractPostMedia(
+  rawContent: string,
+  existingMediaUrl?: string | null
+): { content: string; mediaUrl: string | null } {
+  if (!rawContent) {
+    return { content: "", mediaUrl: existingMediaUrl || null };
+  }
+  const mediaMatch = rawContent.match(/<!--media:(.+?)-->/);
+  const mediaUrl = mediaMatch ? mediaMatch[1] : (existingMediaUrl || null);
+  const content = rawContent.replace(/\n?<!--media:(.+?)-->/g, "").trim();
+  return { content, mediaUrl };
+}

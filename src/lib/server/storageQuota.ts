@@ -411,17 +411,19 @@ export async function cleanupOrphanedFiles(
     // 1. Get user's current profile avatar and posts media_urls
     const [profileRes, postsRes, avatarsRes, mediaRes] = await Promise.all([
       admin.from("profiles").select("avatar_url").eq("id", userId).maybeSingle(),
-      admin.from("posts").select("media_url").eq("author_id", userId),
+      admin.from("posts").select("content").eq("author_id", userId),
       admin.storage.from("avatars").list(userId).catch(() => ({ data: [] })),
       admin.storage.from("media").list(userId).catch(() => ({ data: [] })),
     ]);
 
     const activeAvatar = profileRes.data?.avatar_url || "";
-    const activeMediaUrls = new Set(
-      (postsRes.data || [])
-        .map((p) => p.media_url)
-        .filter(Boolean) as string[]
-    );
+    const activeMediaUrls = new Set<string>();
+    for (const p of postsRes.data || []) {
+      const match = (p.content || "").match(/<!--media:(.+?)-->/);
+      if (match && match[1]) {
+        activeMediaUrls.add(match[1]);
+      }
+    }
 
     // 2. Check avatars bucket: any avatar file that is not the active avatar_url is orphaned
     const avatarFiles = avatarsRes.data || [];

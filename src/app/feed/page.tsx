@@ -99,8 +99,15 @@ export default function FeedPage() {
     fetchPosts();
   }, [fetchPosts]);
 
-  const handlePostCreated = () => {
+  const handlePostCreated = (newPost?: Post) => {
     cachedFeedPosts = {};
+    if (newPost) {
+      const matchesTab = activeTab === "latest" || (activeTab === "questions" && newPost.post_type === "question");
+      const matchesTag = !selectedTag || (newPost.tags && newPost.tags.some((t) => t.toLowerCase() === selectedTag.toLowerCase()));
+      if (matchesTab && matchesTag) {
+        setPosts((prev) => [newPost, ...prev.filter((p) => p.id !== newPost.id)]);
+      }
+    }
     fetchPosts(activeTab, selectedTag, true);
     fetchTrendingTags();
   };
@@ -173,6 +180,7 @@ export default function FeedPage() {
               <button
                 type="button"
                 onClick={() => {
+                  cachedFeedPosts = {};
                   fetchPosts(activeTab, selectedTag, true);
                   fetchTrendingTags();
                 }}
