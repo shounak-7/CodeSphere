@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { toggleVerifiedStatus, isUserVerifiedAsync } from "@/lib/storage/communityStore";
 import { isTeamAccount } from "@/lib/utils";
+import { invalidateVerifiedCache } from "@/lib/server/verification";
 
 // Known administrator IDs and usernames
 const ADMIN_USER_IDS = new Set([
@@ -115,6 +116,8 @@ export async function POST(
     } catch {
       // Ignore if already toggled
     }
+
+    invalidateVerifiedCache();
 
     return NextResponse.json({
       is_verified: nextVerified,

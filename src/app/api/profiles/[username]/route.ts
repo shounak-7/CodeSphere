@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalProfileData, isUserVerifiedAsync } from "@/lib/storage/communityStore";
 import { getLocalPrograms } from "@/lib/storage/workspaceStore";
 import { isTeamAccount } from "@/lib/utils";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 export async function GET(
   request: Request,
@@ -54,20 +55,8 @@ export async function GET(
     if (profile && targetProfileId) {
       const isOwner = currentUser?.id === targetProfileId;
 
-      let isVerified = Boolean(profile.is_verified) || isTeamAccount(profile.username);
-      if (!isVerified && targetProfileId) {
-        try {
-          const { data: authUserData } = await admin.auth.admin.getUserById(targetProfileId);
-          if (authUserData?.user?.user_metadata?.is_verified === true) {
-            isVerified = true;
-          } else {
-            isVerified = await isUserVerifiedAsync(profile.username);
-          }
-        } catch {
-          isVerified = await isUserVerifiedAsync(profile.username);
-        }
-      }
-      profile.is_verified = isVerified;
+      const verifiedData = await getVerifiedEntities();
+      profile.is_verified = checkIsVerified(profile, verifiedData);
 
       // Build program and collection queries based on ownership
       let programsQuery = admin

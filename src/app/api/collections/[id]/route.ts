@@ -5,6 +5,7 @@ import {
   getLocalCollectionById,
   deleteLocalCollection,
 } from "@/lib/storage/communityStore";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 export async function GET(
   request: Request,
@@ -36,6 +37,7 @@ export async function GET(
       }
 
       const isOwner = user?.id === collection.owner_id;
+      const verifiedData = await getVerifiedEntities();
       const sanitizedPrograms = (collection.collection_programs || [])
         .filter((cp: any) => cp.program && (isOwner || cp.program.visibility === "public"))
         .map((cp: any) => cp.program);
@@ -43,6 +45,12 @@ export async function GET(
       return NextResponse.json({
         collection: {
           ...collection,
+          owner: collection.owner
+            ? {
+                ...collection.owner,
+                is_verified: checkIsVerified(collection.owner, verifiedData),
+              }
+            : undefined,
           programs: sanitizedPrograms,
         },
       });

@@ -9,6 +9,7 @@ import {
   isUserVerified,
 } from "@/lib/storage/communityStore";
 import { isTeamAccount } from "@/lib/utils";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 async function resolveCurrentUser() {
   const supabase = await createClient();
@@ -54,13 +55,14 @@ export async function GET() {
       const commentNotifs = notifications.filter((n) => n.notification_type === "comment");
       const commentPostIds = Array.from(new Set(commentNotifs.map((n) => n.reference_id).filter(Boolean)));
 
-      const [postsRes, commentsRes] = await Promise.all([
+      const [postsRes, commentsRes, verifiedData] = await Promise.all([
         postIds.length > 0
           ? supabase.from("posts").select("id, title, content").in("id", postIds)
           : Promise.resolve({ data: [] }),
         commentPostIds.length > 0
           ? supabase.from("comments").select("id, post_id, author_id, content, created_at").in("post_id", commentPostIds)
           : Promise.resolve({ data: [] }),
+        getVerifiedEntities(),
       ]);
 
       const postMap = new Map((postsRes.data || []).map((p: any) => [p.id, p]));
@@ -93,10 +95,7 @@ export async function GET() {
           actor: n.actor
             ? {
                 ...n.actor,
-                is_verified:
-                  Boolean(n.actor.is_verified) ||
-                  isTeamAccount(n.actor.username) ||
-                  isUserVerified(n.actor.username),
+                is_verified: checkIsVerified(n.actor, verifiedData),
               }
             : undefined,
           post_title: postTitle,

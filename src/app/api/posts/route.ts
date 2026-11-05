@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getLocalPosts, saveLocalPost, getLocalBookmarks, getLocalProfile, isUserVerified } from "@/lib/storage/communityStore";
 import { isTeamAccount } from "@/lib/utils";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 const CreatePostSchema = z.object({
   title: z.string().max(150).optional(),
@@ -50,37 +51,39 @@ export async function GET(request: Request) {
     if (!error && posts && posts.length > 0) {
       let bookmarkedIds = new Set<string>();
       let likedIds = new Set<string>();
+      const postLikesCountMap = new Map<string, number>();
+      const postIds = posts.map((p) => p.id);
 
-      if (user) {
-        const postIds = posts.map((p) => p.id);
-        try {
-          const [likesRes, bookmarksRes] = await Promise.all([
-            supabase
-              .from("post_likes")
-              .select("post_id")
-              .eq("user_id", user.id)
-              .in("post_id", postIds),
-            supabase
+      const [verifiedData, likesRes, bookmarksRes] = await Promise.all([
+        getVerifiedEntities(),
+        supabase
+          .from("post_likes")
+          .select("post_id, user_id")
+          .in("post_id", postIds),
+        user
+          ? supabase
               .from("bookmarks")
               .select("target_id")
               .eq("user_id", user.id)
               .eq("target_type", "post")
-              .in("target_id", postIds),
-          ]);
+              .in("target_id", postIds)
+          : Promise.resolve({ data: [] }),
+      ]);
 
-          if (likesRes.data) {
-            likedIds = new Set(likesRes.data.map((l: { post_id: string }) => l.post_id));
+      if (likesRes.data) {
+        for (const l of likesRes.data as { post_id: string; user_id: string }[]) {
+          postLikesCountMap.set(l.post_id, (postLikesCountMap.get(l.post_id) || 0) + 1);
+          if (user && l.user_id === user.id) {
+            likedIds.add(l.post_id);
           }
-          if (bookmarksRes.data && bookmarksRes.data.length > 0) {
-            bookmarkedIds = new Set(bookmarksRes.data.map((b: { target_id: string }) => b.target_id));
-          } else {
-            const localBookmarks = await getLocalBookmarks(user.id);
-            bookmarkedIds = new Set(localBookmarks.map((b) => b.target_id));
-          }
-        } catch {
-          const localBookmarks = await getLocalBookmarks(user.id);
-          bookmarkedIds = new Set(localBookmarks.map((b) => b.target_id));
         }
+      }
+
+      if (bookmarksRes?.data && bookmarksRes.data.length > 0) {
+        bookmarkedIds = new Set(bookmarksRes.data.map((b: { target_id: string }) => b.target_id));
+      } else if (user) {
+        const localBookmarks = await getLocalBookmarks(user.id);
+        bookmarkedIds = new Set(localBookmarks.map((b) => b.target_id));
       }
 
       const formattedPosts = posts.map((post) => ({
@@ -88,15 +91,12 @@ export async function GET(request: Request) {
         author: post.author
           ? {
               ...post.author,
-              is_verified:
-                Boolean(post.author.is_verified) ||
-                isTeamAccount(post.author.username) ||
-                isUserVerified(post.author.username),
+              is_verified: checkIsVerified(post.author, verifiedData),
             }
           : undefined,
         is_liked: likedIds.has(post.id),
         is_bookmarked: bookmarkedIds.has(post.id),
-        likes_count: post.likes_count || 0,
+        likes_count: postLikesCountMap.has(post.id) ? postLikesCountMap.get(post.id)! : (post.likes_count || 0),
         comments_count: post.comments_count || 0,
       }));
 

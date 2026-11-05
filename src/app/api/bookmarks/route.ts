@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getLocalBookmarks, toggleLocalBookmark, isUserVerified } from "@/lib/storage/communityStore";
 import { isTeamAccount } from "@/lib/utils";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 const BookmarkSchema = z.object({
   target_type: z.enum(["post", "program", "collection"]),
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
         const progIds = rawBookmarks.filter((b) => b.target_type === "program").map((b) => b.target_id);
         const colIds = rawBookmarks.filter((b) => b.target_type === "collection").map((b) => b.target_id);
 
-        const [postsRes, progsRes, colsRes] = await Promise.all([
+        const [postsRes, progsRes, colsRes, verifiedData] = await Promise.all([
           postIds.length > 0
             ? supabase
                 .from("posts")
@@ -56,6 +57,7 @@ export async function GET(request: Request) {
                 .select("id, title, description, created_at")
                 .in("id", colIds)
             : Promise.resolve({ data: [] }),
+          getVerifiedEntities(),
         ]);
 
         const postsMap = new Map(
@@ -69,10 +71,7 @@ export async function GET(request: Request) {
                 author: p.author
                   ? {
                       ...p.author,
-                      is_verified:
-                        Boolean(p.author.is_verified) ||
-                        isTeamAccount(p.author.username) ||
-                        isUserVerified(p.author.username),
+                      is_verified: checkIsVerified(p.author, verifiedData),
                     }
                   : undefined,
                 is_liked: false,

@@ -92,15 +92,16 @@ export async function POST(
       }
 
       // Query exact live like count from Supabase
-      const { count: supaLikesCount } = await supabase
+      const admin = createAdminClient();
+      const { count: supaLikesCount } = await admin
         .from("post_likes")
-        .select("id", { count: "exact" })
+        .select("id", { count: "exact", head: true })
         .eq("post_id", postId);
 
-      const count = supaLikesCount ?? (liked ? 1 : 0);
+      const count = typeof supaLikesCount === "number" ? supaLikesCount : (liked ? 1 : 0);
 
-      // Keep post.likes_count column updated in DB
-      await supabase
+      // Keep post.likes_count column updated in DB (using admin to bypass author-only RLS)
+      await admin
         .from("posts")
         .update({ likes_count: count })
         .eq("id", postId);

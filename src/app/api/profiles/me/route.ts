@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalProfileData, saveLocalProfile } from "@/lib/storage/communityStore";
 import { isTeamAccount } from "@/lib/utils";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 const UpdateProfileSchema = z.object({
   full_name: z.string().max(100).optional(),
@@ -40,11 +41,10 @@ export async function GET(request: Request) {
         .maybeSingle();
 
       if (supaProfile) {
+        const verifiedData = await getVerifiedEntities();
         const profileWithVerified = {
           ...supaProfile,
-          is_verified:
-            isTeamAccount(supaProfile.username) ||
-            (user.user_metadata?.is_verified === true),
+          is_verified: checkIsVerified(supaProfile, verifiedData),
         };
         return NextResponse.json(
           { profile: profileWithVerified },
@@ -93,10 +93,8 @@ export async function GET(request: Request) {
     const supaProfile = profileRes.data;
 
     if (supaProfile) {
-      const isProfileVerified =
-        Boolean((supaProfile as any).is_verified) ||
-        isTeamAccount(supaProfile.username) ||
-        (user?.user_metadata?.is_verified === true);
+      const verifiedData = await getVerifiedEntities();
+      const isProfileVerified = checkIsVerified(supaProfile, verifiedData);
       const fullProfile = { ...supaProfile, is_verified: isProfileVerified };
 
       const followersCount = followersCountRes.count ?? (followersCountRes.data?.length || 0);

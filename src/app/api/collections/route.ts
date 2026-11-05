@@ -8,6 +8,7 @@ import {
 } from "@/lib/storage/communityStore";
 import { getLocalPrograms } from "@/lib/storage/workspaceStore";
 import { isTeamAccount } from "@/lib/utils";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 const CreateCollectionSchema = z.object({
   title: z.string().min(1, "Folder name is required").max(100),
@@ -35,15 +36,13 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: false });
 
     if (!error && collections && collections.length > 0) {
+      const verifiedData = await getVerifiedEntities();
       const sanitized = collections.map((col) => ({
         ...col,
         owner: col.owner
           ? {
               ...col.owner,
-              is_verified:
-                Boolean(col.owner.is_verified) ||
-                isTeamAccount(col.owner.username) ||
-                isUserVerified(col.owner.username),
+              is_verified: checkIsVerified(col.owner, verifiedData),
             }
           : undefined,
         collection_programs: (col.collection_programs || []).filter(

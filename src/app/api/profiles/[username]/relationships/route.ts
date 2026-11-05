@@ -8,6 +8,7 @@ import {
   getLocalProfile,
   isUserVerified,
 } from "@/lib/storage/communityStore";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 export async function GET(
   request: Request,
@@ -44,8 +45,8 @@ export async function GET(
     }
 
     if (targetProfileId) {
-      // 2. Fetch followers, following, and current user's following list in parallel
-      const [followersRes, followingRes, myFollowingRes] = await Promise.all([
+      // 2. Fetch followers, following, current user's following list, and verified entities in parallel
+      const [followersRes, followingRes, myFollowingRes, verifiedData] = await Promise.all([
         admin
           .from("follows")
           .select(`
@@ -64,6 +65,7 @@ export async function GET(
               .select("following_id")
               .eq("follower_id", currentUserId)
           : Promise.resolve({ data: [] }),
+        getVerifiedEntities(),
       ]);
 
       const myFollowingSet = new Set(
@@ -81,7 +83,7 @@ export async function GET(
           bio: u.bio || "",
           is_following: myFollowingSet.has(u.id),
           is_self: currentUserId === u.id,
-          is_verified: isUserVerified(u.username),
+          is_verified: checkIsVerified(u, verifiedData),
         }));
 
       const following = ((followingRes.data || []) as any[])
@@ -95,7 +97,7 @@ export async function GET(
           bio: u.bio || "",
           is_following: myFollowingSet.has(u.id),
           is_self: currentUserId === u.id,
-          is_verified: isUserVerified(u.username),
+          is_verified: checkIsVerified(u, verifiedData),
         }));
 
       return NextResponse.json(

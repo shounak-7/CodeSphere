@@ -70,7 +70,9 @@ export default function WorkspacePage() {
   } = useCompilerRunner();
 
   // Layout & UI states
-  const [openProgramIds, setOpenProgramIds] = useState<string[]>([]);
+  const [openProgramIds, setOpenProgramIds] = useState<string[]>(() =>
+    activeProgram ? [activeProgram.id] : programs.length > 0 ? [programs[0].id] : []
+  );
   const [isExplorerOpen, setIsExplorerOpen] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(250);
   const [isDraggingExplorer, setIsDraggingExplorer] = useState(false);
@@ -169,10 +171,12 @@ export default function WorkspacePage() {
             }
           }
 
-          // Fallback to first program if no requestedId
-          const first = progData.programs[0];
-          setActiveProgram(first);
-          setOpenProgramIds([first.id]);
+          // Fallback to first program if no requestedId and no program is active yet
+          if (!activeProgram) {
+            const first = progData.programs[0];
+            setActiveProgram(first);
+            setOpenProgramIds((prev) => (prev.length > 0 ? prev : [first.id]));
+          }
         }
       } catch (err) {
         console.warn("Failed to load workspace data:", err);

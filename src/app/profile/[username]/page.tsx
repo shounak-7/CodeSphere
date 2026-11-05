@@ -77,6 +77,7 @@ interface NetworkUser {
 }
 
 const cachedProfileData: Record<string, ProfileData> = {};
+const cachedRelationships: Record<string, { followers: NetworkUser[]; following: NetworkUser[] }> = {};
 
 export default function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const router = useRouter();
@@ -215,14 +216,15 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   };
 
   const fetchRelationships = async () => {
-    if (networkUsers.followers.length === 0 && networkUsers.following.length === 0) {
+    const targetUser = data?.profile?.username || username;
+    if (!cachedRelationships[targetUser]) {
       setNetworkLoading(true);
     }
     try {
-      const targetUser = data?.profile.username || username;
       const res = await fetch(`/api/profiles/${targetUser}/relationships`);
       const relData = await res.json();
       if (relData.followers && relData.following) {
+        cachedRelationships[targetUser] = relData;
         setNetworkUsers(relData);
       }
     } finally {
@@ -233,6 +235,13 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   const openNetworkModal = (tab: "followers" | "following") => {
     setNetworkTab(tab);
     setNetworkSearch("");
+    const targetUser = data?.profile?.username || username;
+    if (cachedRelationships[targetUser]) {
+      setNetworkUsers(cachedRelationships[targetUser]);
+      setNetworkLoading(false);
+    } else {
+      setNetworkLoading(true);
+    }
     setIsNetworkModalOpen(true);
     fetchRelationships();
   };
@@ -785,6 +794,7 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
                   post={post}
                   currentUserId={currentUser?.id}
                   currentUsername={currentUser?.username}
+                  currentUserAvatar={storeProfile?.avatar_url || (storeUser?.user_metadata?.avatar_url as string)}
                 />
               ))
             )}

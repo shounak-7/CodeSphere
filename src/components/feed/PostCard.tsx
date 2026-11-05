@@ -61,15 +61,18 @@ interface PostCardProps {
   post: Post;
   currentUserId?: string;
   currentUsername?: string;
+  currentUserAvatar?: string;
   onPostDeleted?: (id: string) => void;
 }
 
-function PostCardComponent({ post, currentUserId, currentUsername, onPostDeleted }: PostCardProps) {
+const cachedCommentsByPostId: Record<string, Comment[]> = {};
+
+function PostCardComponent({ post, currentUserId, currentUsername, currentUserAvatar, onPostDeleted }: PostCardProps) {
   const [liked, setLiked] = useState(Boolean(post.is_liked));
   const [likesCount, setLikesCount] = useState(typeof post.likes_count === "number" ? post.likes_count : 0);
   const [bookmarked, setBookmarked] = useState(Boolean(post.is_bookmarked));
   const [showComments, setShowComments] = useState(false);
-  const [comments, setComments] = useState<Comment[]>([]);
+  const [comments, setComments] = useState<Comment[]>(() => cachedCommentsByPostId[post.id] || []);
   const [commentsCount, setCommentsCount] = useState(post.comments_count || 0);
   const [commentInput, setCommentInput] = useState("");
   const [loadingComments, setLoadingComments] = useState(false);
@@ -227,13 +230,17 @@ function PostCardComponent({ post, currentUserId, currentUsername, onPostDeleted
     }
     setShowComments(true);
 
-    // If comments are already loaded, display instantly and revalidate in background
-    if (comments.length > 0) {
+    // If comments are already cached, display instantly and revalidate in background
+    if (comments.length > 0 || cachedCommentsByPostId[post.id]?.length) {
+      if (cachedCommentsByPostId[post.id]?.length && comments.length === 0) {
+        setComments(cachedCommentsByPostId[post.id]);
+      }
       fetch(`/api/posts/${post.id}/comments`)
         .then((res) => res.json())
         .then((data) => {
           if (data?.comments) {
             setComments(data.comments);
+            cachedCommentsByPostId[post.id] = data.comments;
             setCommentsCount(data.comments.length);
           }
         })
@@ -247,6 +254,7 @@ function PostCardComponent({ post, currentUserId, currentUsername, onPostDeleted
       const data = await res.json();
       if (data.comments) {
         setComments(data.comments);
+        cachedCommentsByPostId[post.id] = data.comments;
         setCommentsCount(data.comments.length);
       }
     } finally {
@@ -256,26 +264,67 @@ function PostCardComponent({ post, currentUserId, currentUsername, onPostDeleted
 
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commentInput.trim()) return;
+    const trimmed = commentInput.trim();
+    if (!trimmed) return;
+
+    if (!currentUserId) {
+      useToastStore.getState().addToast("Please sign in to comment on posts.", "warning");
+      return;
+    }
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticComment: Comment = {
+      id: tempId,
+      post_id: post.id,
+      author_id: currentUserId,
+      content: trimmed,
+      created_at: new Date().toISOString(),
+      author: {
+        username: currentUsername || "you",
+        full_name: currentUsername || "You",
+        avatar_url: currentUserAvatar || "",
+        is_verified: isVerifiedAccount({ username: currentUsername }),
+      },
+    };
+
+    // Instant optimistic insertion
+    setComments((prev) => [...prev, optimisticComment]);
+    setCommentsCount((prev) => prev + 1);
+    setCommentInput("");
 
     setSubmittingComment(true);
     try {
       const res = await fetch(`/api/posts/${post.id}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: commentInput.trim() }),
+        body: JSON.stringify({ content: trimmed }),
       });
       const data = await res.json();
       if (res.status === 401) {
+        setComments((prev) => prev.filter((c) => c.id !== tempId));
+        setCommentsCount((prev) => Math.max(0, prev - 1));
+        setCommentInput(trimmed);
         useToastStore.getState().addToast("Please sign in to comment on posts.", "warning");
         return;
       }
       if (res.ok && data.comment) {
-        setComments((prev) => [...prev, data.comment]);
-        setCommentsCount((prev) => prev + 1);
-        setCommentInput("");
+        setComments((prev) => prev.map((c) => (c.id === tempId ? data.comment : c)));
+        cachedCommentsByPostId[post.id] = [
+          ...(cachedCommentsByPostId[post.id] || []).filter((c) => c.id !== tempId),
+          data.comment,
+        ];
         useToastStore.getState().addToast("Comment posted!", "success");
+      } else {
+        setComments((prev) => prev.filter((c) => c.id !== tempId));
+        setCommentsCount((prev) => Math.max(0, prev - 1));
+        setCommentInput(trimmed);
+        useToastStore.getState().addToast(data.error || "Failed to post comment", "error");
       }
+    } catch {
+      setComments((prev) => prev.filter((c) => c.id !== tempId));
+      setCommentsCount((prev) => Math.max(0, prev - 1));
+      setCommentInput(trimmed);
+      useToastStore.getState().addToast("Network error posting comment", "error");
     } finally {
       setSubmittingComment(false);
     }

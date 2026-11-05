@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalComments, addLocalComment } from "@/lib/storage/communityStore";
+import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
 const CreateCommentSchema = z.object({
   content: z.string().min(1, "Comment cannot be empty").max(1000),
@@ -27,8 +28,18 @@ export async function GET(
       .order("created_at", { ascending: true });
 
     if (!error && comments) {
+      const verifiedData = await getVerifiedEntities();
+      const formattedComments = comments.map((c) => ({
+        ...c,
+        author: c.author
+          ? {
+              ...c.author,
+              is_verified: checkIsVerified(c.author, verifiedData),
+            }
+          : undefined,
+      }));
       return NextResponse.json(
-        { comments },
+        { comments: formattedComments },
         {
           headers: {
             "Cache-Control": "public, s-maxage=3, stale-while-revalidate=20",
@@ -157,7 +168,17 @@ export async function POST(
             console.warn("Notification trigger warning:", notifErr);
           }
 
-          return NextResponse.json({ comment }, { status: 201 });
+          const verifiedData = await getVerifiedEntities();
+          const enrichedComment = {
+            ...comment,
+            author: comment.author
+              ? {
+                  ...comment.author,
+                  is_verified: checkIsVerified(comment.author, verifiedData),
+                }
+              : undefined,
+          };
+          return NextResponse.json({ comment: enrichedComment }, { status: 201 });
         }
       } catch (dbErr) {
         console.error("Supabase comment exception:", dbErr);

@@ -43,14 +43,17 @@ export default function FeedPage() {
     } catch {}
   }, []);
 
-  const fetchPosts = useCallback(async (tabToFetch = activeTab, tagToFetch = selectedTag) => {
+  const fetchPosts = useCallback(async (tabToFetch = activeTab, tagToFetch = selectedTag, forceRefresh = false) => {
     const cacheKey = `${tabToFetch}:${tagToFetch || ""}`;
-    if (!cachedFeedPosts[cacheKey]?.length) {
+    if (!cachedFeedPosts[cacheKey]?.length || forceRefresh) {
       setLoading(true);
     }
     try {
       const tagQuery = tagToFetch ? `&tag=${encodeURIComponent(tagToFetch)}` : "";
-      const res = await fetch(`/api/posts?tab=${tabToFetch}${tagQuery}`);
+      const timeQuery = forceRefresh ? `&_t=${Date.now()}` : "";
+      const res = await fetch(`/api/posts?tab=${tabToFetch}${tagQuery}${timeQuery}`, {
+        cache: forceRefresh ? "no-store" : "default",
+      });
       const data = await res.json();
       if (data.posts) {
         cachedFeedPosts[cacheKey] = data.posts;
@@ -166,8 +169,9 @@ export default function FeedPage() {
               </div>
 
               <button
+                type="button"
                 onClick={() => {
-                  fetchPosts();
+                  fetchPosts(activeTab, selectedTag, true);
                   fetchTrendingTags();
                 }}
                 disabled={loading}
@@ -238,6 +242,7 @@ export default function FeedPage() {
                   post={post}
                   currentUserId={currentUser?.id}
                   currentUsername={currentUser?.username}
+                  currentUserAvatar={profile?.avatar_url || (user?.user_metadata?.avatar_url as string)}
                   onPostDeleted={handlePostDeleted}
                 />
               ))
