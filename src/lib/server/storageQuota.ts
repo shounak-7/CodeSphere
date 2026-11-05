@@ -176,7 +176,7 @@ export async function getUserStorageUsage(userId: string): Promise<StorageQuotaU
     isExhausted,
   };
 
-  storageCache.set(userId, { data: usage, expiresAt: Date.now() + 5000 });
+  storageCache.set(userId, { data: usage, expiresAt: Date.now() + 30000 });
   return usage;
 }
 

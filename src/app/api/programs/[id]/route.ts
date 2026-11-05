@@ -102,11 +102,11 @@ export async function PUT(
                 source_code: updated.source_code,
                 change_description: change_description || "Checkpoint version",
               });
+              invalidateStorageCache(currentUser.id);
             } catch (vErr) {
               console.error("Version creation warning:", vErr);
             }
           }
-          invalidateStorageCache(currentUser.id);
           return NextResponse.json({ program: updated });
         }
       } catch (dbErr) {

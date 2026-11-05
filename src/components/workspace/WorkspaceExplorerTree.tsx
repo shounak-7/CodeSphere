@@ -209,11 +209,24 @@ export function WorkspaceExplorerTree({
     });
   };
 
+  // Prevent cyclical nesting: folder cannot be dropped into itself or any descendant folder
+  const isFolderDescendant = (folderId: string, potentialChildFolderId: string): boolean => {
+    let currentId: string | null | undefined = potentialChildFolderId;
+    while (currentId) {
+      if (currentId === folderId) return true;
+      const found = folders.find((f) => f.id === currentId);
+      currentId = found?.parent_id;
+    }
+    return false;
+  };
+
   // -------------------------------------------------------------
-  // Drag and Drop handlers: Fluid, flicker-free, with auto-expand
+  // Drag and Drop handlers: Universal, fluid & 100% flicker-free
   // -------------------------------------------------------------
   const handleDragStart = (e: React.DragEvent, id: string, type: "file" | "folder", title?: string) => {
     e.stopPropagation();
+    const payload = JSON.stringify({ id, type, title });
+    e.dataTransfer.setData("text/plain", payload);
     e.dataTransfer.setData("application/codesphere-id", id);
     e.dataTransfer.setData("application/codesphere-type", type);
     e.dataTransfer.effectAllowed = "move";
@@ -233,12 +246,12 @@ export function WorkspaceExplorerTree({
     dragCountersRef.current[folderId] = (dragCountersRef.current[folderId] || 0) + 1;
     setDragOverFolderId(folderId);
 
-    // Auto-expand collapsed folders after 400ms hover
+    // Auto-expand collapsed folders after 350ms hover
     if (folderId !== "root" && collapsedFolderIds.has(folderId)) {
       if (folderExpandTimerRef.current) clearTimeout(folderExpandTimerRef.current);
       folderExpandTimerRef.current = setTimeout(() => {
         onToggleFolder(folderId);
-      }, 400);
+      }, 350);
     }
   };
 
@@ -271,13 +284,33 @@ export function WorkspaceExplorerTree({
     dragCountersRef.current = {};
     if (folderExpandTimerRef.current) clearTimeout(folderExpandTimerRef.current);
 
-    const itemId = e.dataTransfer.getData("application/codesphere-id") || draggedItem?.id;
-    const itemType = e.dataTransfer.getData("application/codesphere-type") || draggedItem?.type;
+    let itemId = draggedItem?.id;
+    let itemType = draggedItem?.type;
+
+    if (!itemId) {
+      try {
+        const plain = e.dataTransfer.getData("text/plain");
+        if (plain) {
+          const parsed = JSON.parse(plain);
+          itemId = parsed.id;
+          itemType = parsed.type;
+        }
+      } catch {}
+    }
+
+    if (!itemId) {
+      itemId = e.dataTransfer.getData("application/codesphere-id");
+      itemType = (e.dataTransfer.getData("application/codesphere-type") as any) || "file";
+    }
 
     if (!itemId) return;
 
     if (itemType === "folder") {
-      if (itemId === targetFolderId) return; // Prevent cyclic self-drop
+      if (itemId === targetFolderId) return; // Prevent self-drop
+      if (targetFolderId && isFolderDescendant(itemId, targetFolderId)) {
+        useToastStore.getState().addToast("Cannot move a folder into its own subfolder", "error");
+        return;
+      }
       if (onMoveFolder) {
         await onMoveFolder(itemId, targetFolderId);
       }
@@ -322,7 +355,10 @@ export function WorkspaceExplorerTree({
           onDragLeave={(e) => handleDragLeaveTarget(e, folder.id)}
           onDrop={(e) => handleDropOnTarget(e, folder.id)}
           onClick={() => onToggleFolder(folder.id)}
-          style={{ paddingLeft: `${depth * 14 + 8}px` }}
+          style={{
+            paddingLeft: `${depth * 14 + 8}px`,
+            WebkitUserDrag: "element",
+          } as React.CSSProperties}
           className={`group flex items-center justify-between py-1 sm:py-1.5 pr-1.5 sm:pr-2 rounded-md sm:rounded-lg text-[11px] sm:text-xs cursor-pointer transition-all border ${
             isTarget
               ? "bg-indigo-500/20 text-indigo-300 border-indigo-500 ring-2 ring-indigo-500/40 shadow-sm scale-[1.01]"
@@ -433,6 +469,7 @@ export function WorkspaceExplorerTree({
           <div
             onDragEnter={(e) => handleDragEnterTarget(e, folder.id)}
             onDragOver={(e) => handleDragOverTarget(e, folder.id)}
+            onDragLeave={(e) => handleDragLeaveTarget(e, folder.id)}
             onDrop={(e) => handleDropOnTarget(e, folder.id)}
             className="space-y-0.5"
           >
@@ -475,7 +512,10 @@ export function WorkspaceExplorerTree({
         onDrop={(e) => handleDropOnTarget(e, file.folder_id || null)}
         onClick={() => onSelectProgram(file)}
         onContextMenu={(e) => openMenuOnRowContextMenu(e, "file", file)}
-        style={{ paddingLeft: `${depth * 14 + 12}px` }}
+        style={{
+          paddingLeft: `${depth * 14 + 12}px`,
+          WebkitUserDrag: "element",
+        } as React.CSSProperties}
         className={`group flex items-center justify-between py-1 sm:py-1.5 pr-1.5 sm:pr-2 rounded-md sm:rounded-lg text-[11px] sm:text-xs cursor-pointer transition-all border ${
           isActive
             ? "bg-primary/15 text-primary border-primary/30 font-semibold shadow-xs"
@@ -573,6 +613,9 @@ export function WorkspaceExplorerTree({
   return (
     <div
       ref={treeContainerRef}
+      onDragEnter={(e) => {
+        e.preventDefault();
+      }}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";

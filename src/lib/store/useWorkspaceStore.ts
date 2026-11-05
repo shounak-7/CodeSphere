@@ -80,18 +80,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       setActiveCode: (code) =>
         set((state) => {
           if (!state.activeProgram) return { activeCode: code };
-          const updatedActiveProgram = {
-            ...state.activeProgram,
-            source_code: code,
-            updated_at: new Date().toISOString(),
-          };
-          const updatedPrograms = state.programs.map((p) =>
-            p.id === state.activeProgram!.id ? updatedActiveProgram : p
-          );
           return {
             activeCode: code,
-            activeProgram: updatedActiveProgram,
-            programs: updatedPrograms,
+            activeProgram: {
+              ...state.activeProgram,
+              source_code: code,
+            },
             isDirty: false,
             lastSavedAt: new Date(),
           };

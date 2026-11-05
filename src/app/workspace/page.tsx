@@ -219,7 +219,7 @@ export default function WorkspacePage() {
     // Debounced silent background sync to cloud database without interrupting typing
     saveTimerRef.current = setTimeout(() => {
       handleSave(false);
-    }, 600);
+    }, 1500);
 
     return () => {
       if (saveTimerRef.current) {
@@ -231,10 +231,11 @@ export default function WorkspacePage() {
   // Window beforeunload sync guard
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (activeProgram && activeCode) {
+      const currentCode = useWorkspaceStore.getState().activeCode;
+      if (activeProgram && currentCode) {
         navigator.sendBeacon?.(
           `/api/programs/${activeProgram.id}`,
-          new Blob([JSON.stringify({ title: activeProgram.title, source_code: activeCode })], {
+          new Blob([JSON.stringify({ title: activeProgram.title, source_code: currentCode })], {
             type: "application/json",
           })
         );
@@ -242,7 +243,7 @@ export default function WorkspacePage() {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [activeProgram, activeCode]);
+  }, [activeProgram]);
 
   // Explorer horizontal resize dragging
   const handleExplorerMouseDownResize = (e: React.MouseEvent) => {
@@ -299,8 +300,8 @@ export default function WorkspacePage() {
   // Save current active program
   const handleSave = async (showFeedback = true) => {
     if (!activeProgram) return;
-    setIsSaving(true);
-    const codeToSave = activeCode;
+    if (showFeedback) setIsSaving(true);
+    const codeToSave = useWorkspaceStore.getState().activeCode;
     const programId = activeProgram.id;
     try {
       const res = await fetch(`/api/programs/${programId}`, {
@@ -315,17 +316,23 @@ export default function WorkspacePage() {
       if (res.ok && data.program) {
         setIsDirty(false);
         setLastSavedAt(new Date());
-        // Preserve whatever the user is actively typing right now! Never overwrite live activeCode!
-        setPrograms(programs.map((p) => (p.id === data.program.id ? { ...data.program, source_code: activeCode } : p)));
-        if (activeProgram.id === data.program.id) {
-          setActiveProgram({ ...data.program, source_code: activeCode });
-        }
+        // CRITICAL: NEVER CALL setActiveProgram HERE!
+        // Calling setActiveProgram resets activeCode and redirects the cursor to the last line!
+        useWorkspaceStore.setState((state) => ({
+          programs: state.programs.map((p) =>
+            p.id === data.program.id ? { ...p, updated_at: data.program.updated_at } : p
+          ),
+          activeProgram:
+            state.activeProgram && state.activeProgram.id === data.program.id
+              ? { ...state.activeProgram, updated_at: data.program.updated_at }
+              : state.activeProgram,
+        }));
         if (showFeedback) {
           useToastStore.getState().addToast("Program saved successfully", "success");
         }
       }
     } finally {
-      setIsSaving(false);
+      if (showFeedback) setIsSaving(false);
     }
   };
 
@@ -413,50 +420,81 @@ export default function WorkspacePage() {
     });
   };
 
-  // Move program into another folder or root
+  // Move program into another folder or root with 0ms instant optimistic update
   const handleMoveProgram = async (programId: string, targetFolderId: string | null) => {
+    const previousPrograms = programs;
+    const targetFolder = folders.find((f) => f.id === targetFolderId);
+    const targetFolderName = targetFolder ? targetFolder.name : "Root Directory";
+
+    // 1. Optimistic 0ms instant UI update
+    setPrograms(
+      programs.map((p) => (p.id === programId ? { ...p, folder_id: targetFolderId } : p))
+    );
+    if (activeProgram?.id === programId) {
+      useWorkspaceStore.setState((state) => ({
+        activeProgram: state.activeProgram ? { ...state.activeProgram, folder_id: targetFolderId } : null,
+      }));
+    }
+    // Auto-expand target folder so dropped item is instantly visible
+    if (targetFolderId) {
+      setCollapsedFolderIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetFolderId);
+        return next;
+      });
+    }
+    useToastStore.getState().addToast(`Moved file to "${targetFolderName}"`, "success");
+
+    // 2. Background sync to database
     try {
       const res = await fetch(`/api/programs/${programId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folder_id: targetFolderId }),
       });
-      if (res.ok) {
-        setPrograms(
-          programs.map((p) => (p.id === programId ? { ...p, folder_id: targetFolderId } : p))
-        );
-        if (activeProgram?.id === programId) {
-          setActiveProgram({ ...activeProgram, folder_id: targetFolderId });
-        }
-        const targetFolderName = targetFolderId
-          ? folders.find((f) => f.id === targetFolderId)?.name || "Folder"
-          : "Root Directory";
-        useToastStore.getState().addToast(`Moved file to ${targetFolderName}`, "success");
+      if (!res.ok) {
+        setPrograms(previousPrograms);
+        useToastStore.getState().addToast("Failed to move file", "error");
       }
     } catch {
+      setPrograms(previousPrograms);
       useToastStore.getState().addToast("Failed to move file", "error");
     }
   };
 
-  // Move folder into another folder or root
+  // Move folder into another folder or root with 0ms instant optimistic update
   const handleMoveFolder = async (folderId: string, targetParentId: string | null) => {
     if (folderId === targetParentId) return;
+    const previousFolders = folders;
+    const targetFolder = folders.find((f) => f.id === targetParentId);
+    const targetFolderName = targetFolder ? targetFolder.name : "Root Directory";
+
+    // 1. Optimistic 0ms instant UI update
+    setFolders(
+      folders.map((f) => (f.id === folderId ? { ...f, parent_id: targetParentId } : f))
+    );
+    if (targetParentId) {
+      setCollapsedFolderIds((prev) => {
+        const next = new Set(prev);
+        next.delete(targetParentId);
+        return next;
+      });
+    }
+    useToastStore.getState().addToast(`Moved folder to "${targetFolderName}"`, "success");
+
+    // 2. Background sync to database
     try {
       const res = await fetch(`/api/folders/${folderId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ parent_id: targetParentId }),
       });
-      if (res.ok) {
-        setFolders(
-          folders.map((f) => (f.id === folderId ? { ...f, parent_id: targetParentId } : f))
-        );
-        const targetFolderName = targetParentId
-          ? folders.find((f) => f.id === targetParentId)?.name || "Folder"
-          : "Root Directory";
-        useToastStore.getState().addToast(`Moved folder to ${targetFolderName}`, "success");
+      if (!res.ok) {
+        setFolders(previousFolders);
+        useToastStore.getState().addToast("Failed to move folder", "error");
       }
     } catch {
+      setFolders(previousFolders);
       useToastStore.getState().addToast("Failed to move folder", "error");
     }
   };
@@ -1124,6 +1162,7 @@ export default function WorkspacePage() {
               <div className="flex-1 flex flex-col overflow-hidden relative">
                 <div className="flex-1 overflow-hidden bg-card min-h-0">
                   <CodeEditor
+                    fileId={activeProgram?.id}
                     code={activeCode}
                     onChange={(val) => setActiveCode(val || "")}
                     wordWrap={wordWrap ? "on" : "off"}

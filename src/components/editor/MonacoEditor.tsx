@@ -16,6 +16,7 @@ const Editor = dynamic(() => import("@monaco-editor/react"), {
 });
 
 interface CodeEditorProps {
+  fileId?: string;
   code: string;
   onChange: (value: string | undefined) => void;
   language?: string;
@@ -26,6 +27,7 @@ interface CodeEditorProps {
 }
 
 function CodeEditorComponent({
+  fileId,
   code,
   onChange,
   language = "c",
@@ -85,6 +87,37 @@ function CodeEditorComponent({
   const effectiveFontSize = isMobile ? Math.min(fontSize, 12) : fontSize;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef = useRef<any>(null);
+  const currentFileIdRef = useRef<string | undefined>(fileId);
+  const isInternalTypingRef = useRef<boolean>(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Synchronize file switching or external code changes without resetting cursor during active typing
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    // Case 1: Switching to another file or tab
+    if (fileId !== currentFileIdRef.current) {
+      currentFileIdRef.current = fileId;
+      if (editorRef.current.getValue() !== (code || "")) {
+        editorRef.current.setValue(code || "");
+      }
+      return;
+    }
+
+    // Case 2: Same file, external update (e.g. Version restore or Reset), only when editor is not actively typed into
+    if (!isInternalTypingRef.current && !editorRef.current.hasTextFocus()) {
+      if (editorRef.current.getValue() !== (code || "")) {
+        editorRef.current.setValue(code || "");
+      }
+    }
+  }, [fileId, code]);
+
+  // Clean up typing timeout
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, []);
 
   // Dynamically update Monaco wordWrap configuration instantly when toggled
   useEffect(() => {
@@ -96,17 +129,29 @@ function CodeEditorComponent({
     }
   }, [wordWrap]);
 
+  const handleEditorChange = (val: string | undefined) => {
+    isInternalTypingRef.current = true;
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      isInternalTypingRef.current = false;
+    }, 1200);
+    onChange(val);
+  };
+
   return (
     <div className="w-full h-full overflow-hidden">
       <Editor
         height={height}
         language={language}
         theme={activeTheme}
-        value={code}
-        onChange={onChange}
+        defaultValue={code}
+        onChange={handleEditorChange}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onMount={(editor: any) => {
           editorRef.current = editor;
+          if (code && editor.getValue() !== code) {
+            editor.setValue(code);
+          }
         }}
         options={{
           readOnly,
