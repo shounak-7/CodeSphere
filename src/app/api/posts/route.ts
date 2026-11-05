@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getLocalPosts, saveLocalPost, getLocalBookmarks, getLocalProfile, isUserVerified } from "@/lib/storage/communityStore";
 import { isTeamAccount } from "@/lib/utils";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
@@ -164,72 +165,88 @@ export async function POST(request: Request) {
       avatar_url: user?.user_metadata?.avatar_url || "",
     };
 
-    // Try Supabase insert
-    if (user) {
-      try {
-        // Ensure user profile exists to satisfy foreign key constraint
-        const { data: existingProfile } = await supabase
+    // Use admin client for verified and resilient database persistence
+    const admin = createAdminClient();
+
+    try {
+      // 1. Ensure user profile exists to satisfy foreign key constraint
+      const { data: existingProfile } = await admin
+        .from("profiles")
+        .select("id, username")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!existingProfile) {
+        const emailPrefix = user.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "") || "coder";
+        let baseUsername = (user.user_metadata?.username || user.user_metadata?.user_name || emailPrefix).toLowerCase().replace(/[^a-z0-9_]/g, "");
+        if (!baseUsername || baseUsername.length < 3) baseUsername = `coder_${user.id.substring(0, 5)}`;
+
+        // Guarantee unique username in profiles table
+        const { data: conflict } = await admin
           .from("profiles")
           .select("id")
-          .eq("id", user.id)
+          .eq("username", baseUsername)
           .maybeSingle();
 
-        if (!existingProfile) {
-          const emailPrefix = user.email?.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "") || "coder";
-          const username = user.user_metadata?.username || `${emailPrefix}_${user.id.substring(0, 5)}`;
-          const fullName = user.user_metadata?.full_name || user.user_metadata?.name || emailPrefix;
-          const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture || "";
+        const finalUsername = conflict && conflict.id !== user.id
+          ? `${baseUsername.slice(0, 18)}_${user.id.substring(0, 4)}`
+          : baseUsername;
 
-          await supabase.from("profiles").upsert({
-            id: user.id,
-            username,
-            full_name: fullName,
-            avatar_url: avatarUrl,
-          });
-        }
+        const fullName = user.user_metadata?.full_name || user.user_metadata?.name || emailPrefix;
+        const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture || "";
 
-        const insertPayload: any = {
-          author_id: user.id,
-          title: parsed.title || null,
-          content: parsed.content,
-          post_type: parsed.post_type,
-          code_snippet: parsed.code_snippet || null,
-          media_url: parsed.media_url || null,
-          language: parsed.language,
-          program_id: parsed.program_id || null,
-          tags: parsed.tags,
-        };
+        await admin.from("profiles").upsert({
+          id: user.id,
+          username: finalUsername,
+          full_name: fullName,
+          avatar_url: avatarUrl,
+        });
+      }
 
-        let { data: post, error } = await supabase
+      // 2. Prepare post insertion payload
+      const insertPayload: any = {
+        author_id: user.id,
+        title: parsed.title || null,
+        content: parsed.content,
+        post_type: parsed.post_type,
+        code_snippet: parsed.code_snippet || null,
+        media_url: parsed.media_url || null,
+        language: parsed.language,
+        program_id: parsed.program_id || null,
+        tags: parsed.tags,
+      };
+
+      let { data: post, error } = await admin
+        .from("posts")
+        .insert(insertPayload)
+        .select(`*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`)
+        .single();
+
+      if (error && (error as any).code === "42703") {
+        // Column media_url not yet created in Supabase schema; retry insert without it
+        delete insertPayload.media_url;
+        const retry = await admin
           .from("posts")
           .insert(insertPayload)
           .select(`*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`)
           .single();
-
-        if (error && (error as any).code === "42703") {
-          // Column media_url not yet created in Supabase schema; retry insert without it
-          delete insertPayload.media_url;
-          const retry = await supabase
-            .from("posts")
-            .insert(insertPayload)
-            .select(`*, author:profiles!posts_author_id_fkey(id, username, full_name, avatar_url)`)
-            .single();
-          post = retry.data ? { ...retry.data, media_url: parsed.media_url || null } : null;
-          error = retry.error;
-        }
-
-        if (error) {
-          console.error("Supabase post creation error:", error);
-        } else if (post) {
-          invalidateStorageCache(user.id);
-          return NextResponse.json({ post }, { status: 201 });
-        }
-      } catch (dbErr) {
-        console.error("Supabase post creation exception:", dbErr);
+        post = retry.data ? { ...retry.data, media_url: parsed.media_url || null } : null;
+        error = retry.error;
       }
+
+      if (post) {
+        invalidateStorageCache(user.id);
+        return NextResponse.json({ post }, { status: 201 });
+      }
+
+      if (error) {
+        console.error("Supabase post creation error:", error);
+      }
+    } catch (dbErr) {
+      console.error("Supabase post creation exception:", dbErr);
     }
 
-    // Local store persistence
+    // Local store persistence fallback
     const localPost = await saveLocalPost({
       author_id: authorId,
       author: authorMeta,
@@ -242,6 +259,8 @@ export async function POST(request: Request) {
       program_id: parsed.program_id,
       tags: parsed.tags,
     });
+
+    return NextResponse.json({ post: localPost }, { status: 201 });
 
     return NextResponse.json({ post: localPost }, { status: 201 });
   } catch (err) {
