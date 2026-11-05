@@ -83,11 +83,28 @@ function getInitialProfileData(username: string): ProfileData | null {
   if (cachedProfileData[username]) return cachedProfileData[username];
   if (typeof window !== "undefined") {
     try {
-      const saved = sessionStorage.getItem(`codesphere_profile_${username.toLowerCase()}`);
+      const saved = localStorage.getItem(`codesphere_profile_${username.toLowerCase()}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.profile) {
           cachedProfileData[username] = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function getInitialRelationships(username: string): { followers: NetworkUser[]; following: NetworkUser[] } | null {
+  if (cachedRelationships[username]) return cachedRelationships[username];
+  if (typeof window !== "undefined") {
+    try {
+      const saved = localStorage.getItem(`codesphere_rel_${username.toLowerCase()}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && Array.isArray(parsed.followers) && Array.isArray(parsed.following)) {
+          cachedRelationships[username] = parsed;
           return parsed;
         }
       }
@@ -102,16 +119,48 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   const searchParams = useSearchParams();
   const shouldOpenEdit = searchParams.get("edit") === "true";
 
-  const [data, setData] = useState<ProfileData | null>(() => getInitialProfileData(username));
-  const [loading, setLoading] = useState(() => !getInitialProfileData(username));
+  const storeUser = useUserStore((s) => s.user);
+  const storeProfile = useUserStore((s) => s.profile);
+
+  const [data, setData] = useState<ProfileData | null>(() => {
+    const cached = getInitialProfileData(username);
+    if (cached) return cached;
+    if ((username === "me" || (storeProfile?.username && username.toLowerCase() === storeProfile.username.toLowerCase())) && storeUser) {
+      return {
+        profile: {
+          id: storeUser.id,
+          username: storeProfile?.username || storeUser.email?.split("@")[0] || "developer",
+          full_name: storeProfile?.full_name || (storeUser.user_metadata?.full_name as string) || "Developer",
+          avatar_url: storeProfile?.avatar_url || (storeUser.user_metadata?.avatar_url as string) || "",
+          bio: storeProfile?.bio || "",
+          college: storeProfile?.college || "",
+          skills: storeProfile?.skills || [],
+          is_verified: storeProfile?.is_verified ?? false,
+          created_at: new Date().toISOString(),
+        },
+        isOwner: true,
+        isFollowing: false,
+        stats: {
+          followersCount: 0,
+          followingCount: 0,
+          programsCount: 0,
+          postsCount: 0,
+        },
+        programs: [],
+        posts: [],
+        collections: [],
+      };
+    }
+    return null;
+  });
+
+  const [loading, setLoading] = useState(() => !data);
   const [activeTab, setActiveTab] = useState<"posts" | "programs" | "collections">("posts");
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowedBy, setIsFollowedBy] = useState(false);
   const [isHoveringFollow, setIsHoveringFollow] = useState(false);
-  const [followersCount, setFollowersCount] = useState(() => getInitialProfileData(username)?.stats?.followersCount || 0);
-  const [followingCount, setFollowingCount] = useState(() => getInitialProfileData(username)?.stats?.followingCount || 0);
-  const storeUser = useUserStore((s) => s.user);
-  const storeProfile = useUserStore((s) => s.profile);
+  const [followersCount, setFollowersCount] = useState(() => data?.stats?.followersCount || 0);
+  const [followingCount, setFollowingCount] = useState(() => data?.stats?.followingCount || 0);
   const [currentUser, setCurrentUser] = useState<{ id: string; username?: string } | null>(() => {
     if (storeUser) {
       return {
@@ -160,9 +209,9 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
           cachedProfileData[resData.profile.username] = resData;
         }
         try {
-          sessionStorage.setItem(`codesphere_profile_${username.toLowerCase()}`, JSON.stringify(resData));
+          localStorage.setItem(`codesphere_profile_${username.toLowerCase()}`, JSON.stringify(resData));
           if (resData.profile.username) {
-            sessionStorage.setItem(`codesphere_profile_${resData.profile.username.toLowerCase()}`, JSON.stringify(resData));
+            localStorage.setItem(`codesphere_profile_${resData.profile.username.toLowerCase()}`, JSON.stringify(resData));
           }
         } catch {}
         setData(resData);
@@ -191,8 +240,10 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
   useEffect(() => {
     // 1. Fetch profile data immediately without blocking
     fetchProfile();
+    // 2. Pre-fetch network relationships in background for 0ms modal opening
+    fetchRelationships();
 
-    // 2. If viewing another profile, retrieve current user from cache/store
+    // 3. If viewing another profile, retrieve current user from cache/store
     if (username !== "me" && storeUser) {
       const fallbackUsername =
         storeProfile?.username ||
@@ -240,7 +291,8 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
 
   const fetchRelationships = async () => {
     const targetUser = data?.profile?.username || username;
-    if (!cachedRelationships[targetUser]) {
+    const initialRel = getInitialRelationships(targetUser);
+    if (!initialRel) {
       setNetworkLoading(true);
     }
     try {
@@ -248,6 +300,9 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
       const relData = await res.json();
       if (relData.followers && relData.following) {
         cachedRelationships[targetUser] = relData;
+        try {
+          localStorage.setItem(`codesphere_rel_${targetUser.toLowerCase()}`, JSON.stringify(relData));
+        } catch {}
         setNetworkUsers(relData);
       }
     } finally {
@@ -259,8 +314,9 @@ export default function ProfilePage({ params }: { params: Promise<{ username: st
     setNetworkTab(tab);
     setNetworkSearch("");
     const targetUser = data?.profile?.username || username;
-    if (cachedRelationships[targetUser]) {
-      setNetworkUsers(cachedRelationships[targetUser]);
+    const initialRel = getInitialRelationships(targetUser);
+    if (initialRel) {
+      setNetworkUsers(initialRel);
       setNetworkLoading(false);
     } else {
       setNetworkLoading(true);

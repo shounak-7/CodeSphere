@@ -99,8 +99,8 @@ export async function GET(
         postsRes,
         collectionsRes,
       ] = await Promise.all([
-        admin.from("follows").select("follower_id", { count: "exact" }).eq("following_id", targetProfileId),
-        admin.from("follows").select("following_id", { count: "exact" }).eq("follower_id", targetProfileId),
+        admin.from("follows").select("follower_id", { count: "exact", head: true }).eq("following_id", targetProfileId),
+        admin.from("follows").select("following_id", { count: "exact", head: true }).eq("follower_id", targetProfileId),
         currentUser && currentUser.id !== targetProfileId
           ? admin.from("follows").select("follower_id").eq("follower_id", currentUser.id).eq("following_id", targetProfileId).maybeSingle()
           : Promise.resolve({ data: null }),

@@ -10,6 +10,8 @@ import {
 } from "@/lib/storage/communityStore";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 
+const usernameToIdMap = new Map<string, string>();
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ username: string }> }
@@ -28,52 +30,64 @@ export async function GET(
     : undefined;
 
   const targetUsername = username === "me" ? currentUsername || "codesphere" : username;
+  const normalizedUsername = targetUsername.toLowerCase();
 
   try {
     const admin = createAdminClient();
-    // 1. Resolve target user's Supabase ID
+    // 1. Resolve target user's Supabase ID (using fast in-memory cache if available)
     let targetProfileId: string | null = null;
     if (username === "me" && currentUserId) {
       targetProfileId = currentUserId;
+      if (currentUsername) usernameToIdMap.set(currentUsername.toLowerCase(), currentUserId);
+    } else if (usernameToIdMap.has(normalizedUsername)) {
+      targetProfileId = usernameToIdMap.get(normalizedUsername)!;
     } else {
       const { data: tp } = await admin
         .from("profiles")
         .select("id")
         .ilike("username", targetUsername)
         .maybeSingle();
-      targetProfileId = tp?.id || null;
+      if (tp?.id) {
+        targetProfileId = tp.id;
+        usernameToIdMap.set(normalizedUsername, tp.id);
+      }
     }
 
     if (targetProfileId) {
-      // 2. Fetch followers, following, current user's following list, and verified entities in parallel
+      // 2. Fetch raw follows rows and verified entities in parallel (much faster than PostgREST join)
       const [followersRes, followingRes, myFollowingRes, verifiedData] = await Promise.all([
-        admin
-          .from("follows")
-          .select(`
-            follower:profiles!follows_follower_id_fkey(id, username, full_name, avatar_url, bio)
-          `)
-          .eq("following_id", targetProfileId),
-        admin
-          .from("follows")
-          .select(`
-            following:profiles!follows_following_id_fkey(id, username, full_name, avatar_url, bio)
-          `)
-          .eq("follower_id", targetProfileId),
+        admin.from("follows").select("follower_id").eq("following_id", targetProfileId),
+        admin.from("follows").select("following_id").eq("follower_id", targetProfileId),
         currentUserId
-          ? admin
-              .from("follows")
-              .select("following_id")
-              .eq("follower_id", currentUserId)
+          ? admin.from("follows").select("following_id").eq("follower_id", currentUserId)
           : Promise.resolve({ data: [] }),
         getVerifiedEntities(),
       ]);
+
+      const followerIds = ((followersRes.data || []) as { follower_id: string }[]).map((r) => r.follower_id);
+      const followingIds = ((followingRes.data || []) as { following_id: string }[]).map((r) => r.following_id);
+      const allUserIds = Array.from(new Set([...followerIds, ...followingIds]));
+
+      // 3. Batch lookup profile info for all connected users in a single indexed query
+      let profileMap = new Map<string, any>();
+      if (allUserIds.length > 0) {
+        const { data: profiles } = await admin
+          .from("profiles")
+          .select("id, username, full_name, avatar_url, bio")
+          .in("id", allUserIds);
+
+        (profiles || []).forEach((p) => {
+          profileMap.set(p.id, p);
+          if (p.username) usernameToIdMap.set(p.username.toLowerCase(), p.id);
+        });
+      }
 
       const myFollowingSet = new Set(
         ((myFollowingRes?.data || []) as { following_id: string }[]).map((f) => f.following_id)
       );
 
-      const followers = ((followersRes.data || []) as any[])
-        .map((row) => row.follower)
+      const followers = followerIds
+        .map((id) => profileMap.get(id))
         .filter(Boolean)
         .map((u) => ({
           id: u.id,
@@ -86,8 +100,8 @@ export async function GET(
           is_verified: checkIsVerified(u, verifiedData),
         }));
 
-      const following = ((followingRes.data || []) as any[])
-        .map((row) => row.following)
+      const following = followingIds
+        .map((id) => profileMap.get(id))
         .filter(Boolean)
         .map((u) => ({
           id: u.id,
@@ -104,7 +118,7 @@ export async function GET(
         { followers, following },
         {
           headers: {
-            "Cache-Control": "private, max-age=5, stale-while-revalidate=15",
+            "Cache-Control": "private, max-age=10, stale-while-revalidate=60",
           },
         }
       );

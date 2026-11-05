@@ -69,10 +69,11 @@ export async function GET(request: Request) {
       userProgramsRes,
       userPostsRes,
       userCollectionsRes,
+      verifiedData,
     ] = await Promise.all([
       admin.from("profiles").select("*").eq("id", userId).maybeSingle(),
-      admin.from("follows").select("follower_id", { count: "exact" }).eq("following_id", userId),
-      admin.from("follows").select("following_id", { count: "exact" }).eq("follower_id", userId),
+      admin.from("follows").select("follower_id", { count: "exact", head: true }).eq("following_id", userId),
+      admin.from("follows").select("following_id", { count: "exact", head: true }).eq("follower_id", userId),
       admin
         .from("programs")
         .select("id, title, description, category, language, visibility, created_at, updated_at")
@@ -88,17 +89,17 @@ export async function GET(request: Request) {
         .select("*, collection_programs(count)")
         .eq("owner_id", userId)
         .order("updated_at", { ascending: false }),
+      getVerifiedEntities(),
     ]);
 
     const supaProfile = profileRes.data;
 
     if (supaProfile) {
-      const verifiedData = await getVerifiedEntities();
       const isProfileVerified = checkIsVerified(supaProfile, verifiedData);
       const fullProfile = { ...supaProfile, is_verified: isProfileVerified };
 
-      const followersCount = followersCountRes.count ?? (followersCountRes.data?.length || 0);
-      const followingCount = followingCountRes.count ?? (followingCountRes.data?.length || 0);
+      const followersCount = followersCountRes.count ?? 0;
+      const followingCount = followingCountRes.count ?? 0;
       const programs = userProgramsRes.data || [];
       const posts = (userPostsRes.data || []).map((p) => ({
         ...p,
