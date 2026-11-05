@@ -11,6 +11,8 @@ import {
   Send,
   HelpCircle,
   Trophy,
+  UserCheck,
+  UserMinus,
 } from "lucide-react";
 import { formatRelativeTime } from "@/lib/utils";
 import { useToastStore } from "@/lib/store/useToastStore";
@@ -79,6 +81,7 @@ function PostCardComponent({ post, currentUserId, currentUsername, currentUserAv
   const [loadingComments, setLoadingComments] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
   const [following, setFollowing] = useState(Boolean(post.is_following));
+  const [isHoveringFollow, setIsHoveringFollow] = useState(false);
   const [importingCode, setImportingCode] = useState(false);
 
   // Synchronize state when post prop changes (e.g. on feed refresh/tab switch)
@@ -89,6 +92,22 @@ function PostCardComponent({ post, currentUserId, currentUsername, currentUserAv
     setCommentsCount(post.comments_count || 0);
     setFollowing(Boolean(post.is_following));
   }, [post.is_liked, post.likes_count, post.is_bookmarked, post.comments_count, post.is_following]);
+
+  // Synchronize follow state across multiple posts by the same author on the feed
+  useEffect(() => {
+    const handleFollowSync = (e: Event) => {
+      const custom = e as CustomEvent<{ username: string; following: boolean }>;
+      if (
+        custom.detail?.username &&
+        post.author?.username &&
+        custom.detail.username.toLowerCase() === post.author.username.toLowerCase()
+      ) {
+        setFollowing(custom.detail.following);
+      }
+    };
+    window.addEventListener("codesphere:follow-changed", handleFollowSync);
+    return () => window.removeEventListener("codesphere:follow-changed", handleFollowSync);
+  }, [post.author?.username]);
 
   // Delete is strictly restricted only to the same author who posted it
   const isAuthor = Boolean(
@@ -117,6 +136,11 @@ function PostCardComponent({ post, currentUserId, currentUsername, currentUserAv
         useToastStore.getState().addToast(
           data.following ? `Now following @${post.author.username}` : `Unfollowed @${post.author.username}`,
           "info"
+        );
+        window.dispatchEvent(
+          new CustomEvent("codesphere:follow-changed", {
+            detail: { username: post.author.username, following: data.following },
+          })
         );
       } else {
         setFollowing(!nextVal);
@@ -413,13 +437,32 @@ function PostCardComponent({ post, currentUserId, currentUsername, currentUserAv
             <button
               type="button"
               onClick={handleToggleFollow}
+              onMouseEnter={() => setIsHoveringFollow(true)}
+              onMouseLeave={() => setIsHoveringFollow(false)}
               className={`px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold transition-all cursor-pointer ${
                 following
-                  ? "bg-secondary text-foreground border border-border hover:bg-secondary/80"
+                  ? isHoveringFollow
+                    ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30 shadow-xs"
+                    : "bg-secondary text-foreground border border-border hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/30"
                   : "bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs"
               }`}
+              title={following ? `Unfollow @${post.author.username}` : `Follow @${post.author.username}`}
             >
-              {following ? "Following" : "Follow"}
+              {following ? (
+                isHoveringFollow ? (
+                  <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400">
+                    <UserMinus className="w-3 h-3" />
+                    <span>Unfollow</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1">
+                    <UserCheck className="w-3 h-3 text-emerald-500" />
+                    <span>Following</span>
+                  </span>
+                )
+              ) : (
+                <span>Follow</span>
+              )}
             </button>
           )}
 

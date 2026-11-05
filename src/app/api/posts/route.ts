@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getLocalPosts, saveLocalPost, getLocalBookmarks, getLocalProfile, isUserVerified } from "@/lib/storage/communityStore";
+import { getLocalPosts, saveLocalPost, getLocalBookmarks, getLocalProfile, getLocalFollowingIds, isUserVerified } from "@/lib/storage/communityStore";
 import { isTeamAccount, extractPostMedia } from "@/lib/utils";
 import { getVerifiedEntities, checkIsVerified } from "@/lib/server/verification";
 import { invalidateStorageCache } from "@/lib/server/storageQuota";
@@ -65,10 +65,12 @@ export async function GET(request: Request) {
 
       let bookmarkedIds = new Set<string>();
       let likedIds = new Set<string>();
+      const followingAuthorIds = new Set<string>();
       const postLikesCountMap = new Map<string, number>();
       const postIds = posts.map((p) => p.id);
+      const authorIds = Array.from(new Set(posts.map((p) => p.author_id).filter(Boolean)));
 
-      const [verifiedData, likesRes, bookmarksRes] = await Promise.all([
+      const [verifiedData, likesRes, bookmarksRes, followsRes] = await Promise.all([
         getVerifiedEntities(),
         supabase
           .from("post_likes")
@@ -81,6 +83,13 @@ export async function GET(request: Request) {
               .eq("user_id", user.id)
               .eq("target_type", "post")
               .in("target_id", postIds)
+          : Promise.resolve({ data: [] }),
+        user && authorIds.length > 0
+          ? supabase
+              .from("follows")
+              .select("following_id")
+              .eq("follower_id", user.id)
+              .in("following_id", authorIds)
           : Promise.resolve({ data: [] }),
       ]);
 
@@ -100,10 +109,30 @@ export async function GET(request: Request) {
         bookmarkedIds = new Set(localBookmarks.map((b) => b.target_id));
       }
 
+      if (followsRes?.data && followsRes.data.length > 0) {
+        for (const f of followsRes.data as { following_id: string }[]) {
+          followingAuthorIds.add(f.following_id);
+        }
+      }
+      if (user) {
+        const localFollowSet = await getLocalFollowingIds(user.id, user.email?.split("@")[0]);
+        for (const id of localFollowSet) {
+          followingAuthorIds.add(id);
+        }
+      }
+
       const formattedPosts = posts.map((post) => {
         const { content: cleanContent, mediaUrl } = extractPostMedia(
           post.content || "",
           (post as any).media_url
+        );
+
+        const isFollowingAuthor = Boolean(
+          user &&
+            post.author_id &&
+            post.author_id !== user.id &&
+            (followingAuthorIds.has(post.author_id) ||
+              (post.author?.username && followingAuthorIds.has(post.author.username.toLowerCase())))
         );
 
         return {
@@ -118,6 +147,7 @@ export async function GET(request: Request) {
             : undefined,
           is_liked: likedIds.has(post.id),
           is_bookmarked: bookmarkedIds.has(post.id),
+          is_following: isFollowingAuthor,
           is_author: user ? post.author_id === user.id : false,
           likes_count: postLikesCountMap.has(post.id) ? postLikesCountMap.get(post.id)! : (post.likes_count || 0),
           comments_count: post.comments_count || 0,

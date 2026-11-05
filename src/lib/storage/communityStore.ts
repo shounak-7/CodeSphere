@@ -940,6 +940,22 @@ export async function isLocalFollowing(
   return db.follows.some((f) => matchesFollow(f, follower, following));
 }
 
+export async function getLocalFollowingIds(userId: string, username?: string): Promise<Set<string>> {
+  const db = await ensureDB();
+  const set = new Set<string>();
+  const normalizedUsername = username?.toLowerCase();
+  for (const f of db.follows || []) {
+    if (
+      f.follower_id === userId ||
+      (normalizedUsername && f.follower_username?.toLowerCase() === normalizedUsername)
+    ) {
+      if (f.following_id) set.add(f.following_id);
+      if (f.following_username) set.add(f.following_username.toLowerCase());
+    }
+  }
+  return set;
+}
+
 export interface EnrichedBookmark extends StoredBookmark {
   post?: StoredPost | null;
   program?: {

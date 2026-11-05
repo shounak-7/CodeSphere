@@ -249,8 +249,8 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
           />
         )}
 
-        <div className="flex items-center justify-between pt-1">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 pt-1">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
             {!showCodeInput && (
               <button
                 type="button"
@@ -258,10 +258,11 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
                   setShowCodeInput(true);
                   setIsExpanded(true);
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-muted-foreground hover:text-foreground bg-secondary hover:bg-secondary/80 border border-border transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold text-muted-foreground hover:text-foreground bg-secondary hover:bg-secondary/80 border border-border transition-colors cursor-pointer shrink-0"
+                title="Attach C Code"
               >
                 <Code2 className="w-3.5 h-3.5 text-primary" />
-                <span>Add C Code</span>
+                <span><span className="hidden sm:inline">Add </span>C Code</span>
               </button>
             )}
 
@@ -270,7 +271,8 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
                 type="button"
                 disabled={uploadingMedia}
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-muted-foreground hover:text-foreground bg-secondary hover:bg-secondary/80 border border-border transition-colors cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-semibold text-muted-foreground hover:text-foreground bg-secondary hover:bg-secondary/80 border border-border transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                title="Attach Image"
               >
                 {uploadingMedia ? (
                   <>
@@ -280,7 +282,7 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
                 ) : (
                   <>
                     <ImageIcon className="w-3.5 h-3.5 text-primary" />
-                    <span>Add Image</span>
+                    <span><span className="hidden sm:inline">Add </span>Image</span>
                   </>
                 )}
               </button>
@@ -295,12 +297,12 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 ml-auto shrink-0">
             {isExpanded && (
               <button
                 type="button"
                 onClick={() => setIsExpanded(false)}
-                className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                className="px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-medium text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
               >
                 Collapse
               </button>
@@ -308,7 +310,7 @@ export function PostComposer({ onPostCreated, currentUser }: PostComposerProps) 
             <button
               type="submit"
               disabled={loading || !content.trim()}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white bg-primary hover:bg-primary/90 shadow-md shadow-primary/20 active:scale-95 disabled:opacity-50 transition-all cursor-pointer"
+              className="inline-flex items-center gap-1.5 sm:gap-2 px-3.5 sm:px-5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold text-white bg-primary hover:bg-primary/90 shadow-md shadow-primary/20 active:scale-95 disabled:opacity-50 transition-all cursor-pointer shrink-0"
             >
               {loading ? (
                 <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />

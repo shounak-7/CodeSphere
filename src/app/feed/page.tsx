@@ -99,6 +99,35 @@ export default function FeedPage() {
     fetchPosts();
   }, [fetchPosts]);
 
+  // Sync follow updates across all posts in current view and caches
+  useEffect(() => {
+    const handleFollowSync = (e: Event) => {
+      const custom = e as CustomEvent<{ username: string; following: boolean }>;
+      if (!custom.detail?.username) return;
+      const { username, following } = custom.detail;
+      setPosts((prev) =>
+        prev.map((p) => {
+          if (p.author?.username?.toLowerCase() === username.toLowerCase()) {
+            return { ...p, is_following: following };
+          }
+          return p;
+        })
+      );
+      for (const key of Object.keys(cachedFeedPosts)) {
+        if (Array.isArray(cachedFeedPosts[key])) {
+          cachedFeedPosts[key] = cachedFeedPosts[key].map((p) => {
+            if (p.author?.username?.toLowerCase() === username.toLowerCase()) {
+              return { ...p, is_following: following };
+            }
+            return p;
+          });
+        }
+      }
+    };
+    window.addEventListener("codesphere:follow-changed", handleFollowSync);
+    return () => window.removeEventListener("codesphere:follow-changed", handleFollowSync);
+  }, []);
+
   const handlePostCreated = (newPost?: Post) => {
     cachedFeedPosts = {};
     if (newPost) {
