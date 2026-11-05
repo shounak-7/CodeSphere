@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: false,
   compress: true,
+  turbopack: {
+    root: process.cwd(),
+  },
   experimental: {
     optimizePackageImports: ["lucide-react", "@monaco-editor/react"],
   },

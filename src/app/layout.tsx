@@ -26,6 +26,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link rel="preconnect" href="https://vbaidzwcilhydeysewnz.supabase.co" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://vbaidzwcilhydeysewnz.supabase.co" />
         <script
           id="codesphere-theme-init"
           suppressHydrationWarning

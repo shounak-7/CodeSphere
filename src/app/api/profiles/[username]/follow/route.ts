@@ -108,35 +108,37 @@ export async function POST(
         supabaseToggled = true;
         supabaseFollowing = true;
 
-        // Dispatch follow notification to the recipient via admin client
+        // Dispatch follow notification to the recipient asynchronously
         if (targetProfileId !== currentUser.id) {
-          try {
-            const adminSupabase = createAdminClient();
-            await adminSupabase.from("notifications").insert({
-              recipient_id: targetProfileId,
-              actor_id: currentUser.id,
-              notification_type: "follow",
-              reference_id: currentUser.id,
-              is_read: false,
-            });
-
-            // Real-time broadcast dispatch
-            const channel = adminSupabase.channel(`user-notifications-${targetProfileId}`);
-            await channel.send({
-              type: "broadcast",
-              event: "new_notification",
-              payload: {
+          (async () => {
+            try {
+              const adminSupabase = createAdminClient();
+              await adminSupabase.from("notifications").insert({
+                recipient_id: targetProfileId,
+                actor_id: currentUser.id,
                 notification_type: "follow",
-                actor: {
-                  username: currentUsername,
-                  full_name: currentFullName,
-                  avatar_url: currentAvatar,
+                reference_id: currentUser.id,
+                is_read: false,
+              });
+
+              // Real-time broadcast dispatch
+              const channel = adminSupabase.channel(`user-notifications-${targetProfileId}`);
+              await channel.send({
+                type: "broadcast",
+                event: "new_notification",
+                payload: {
+                  notification_type: "follow",
+                  actor: {
+                    username: currentUsername,
+                    full_name: currentFullName,
+                    avatar_url: currentAvatar,
+                  },
                 },
-              },
-            });
-          } catch (notifErr) {
-            console.warn("Follow notification dispatch warning:", notifErr);
-          }
+              });
+            } catch (notifErr) {
+              console.warn("Follow notification dispatch warning:", notifErr);
+            }
+          })();
         }
       }
     } catch (err) {

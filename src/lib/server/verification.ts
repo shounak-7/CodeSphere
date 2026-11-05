@@ -7,10 +7,10 @@ let cachedVerified: {
   timestamp: number;
 } | null = null;
 
-const CACHE_TTL_MS = 30000; // 30 seconds memory cache
+const CACHE_TTL_MS = 300000; // 5 minutes in-memory cache (invalidated on verification change)
 
 /**
- * Retrieve all verified user IDs and usernames across Supabase Auth and team accounts.
+ * Retrieve all verified user IDs and usernames across Supabase Auth, profiles table, and team accounts.
  */
 export async function getVerifiedEntities(): Promise<{ usernames: Set<string>; ids: Set<string> }> {
   const now = Date.now();
@@ -24,15 +24,20 @@ export async function getVerifiedEntities(): Promise<{ usernames: Set<string>; i
   try {
     const admin = createAdminClient();
     const [authRes, profilesRes] = await Promise.all([
-      admin.auth.admin.listUsers({ perPage: 100 }),
-      admin.from("profiles").select("id, username"),
+      admin.auth.admin.listUsers({ perPage: 100 }).catch(() => ({ data: { users: [] }, error: null })),
+      admin.from("profiles").select("id, username, is_verified"),
     ]);
 
     const usernameMap = new Map<string, string>();
     if (profilesRes.data) {
       for (const p of profilesRes.data) {
         if (p.id && p.username) {
-          usernameMap.set(p.id, p.username.toLowerCase());
+          const lower = p.username.toLowerCase();
+          usernameMap.set(p.id, lower);
+          if (p.is_verified) {
+            ids.add(p.id);
+            usernames.add(lower);
+          }
         }
       }
     }

@@ -112,61 +112,63 @@ export async function POST(
         if (error) {
           console.error("Supabase comment error:", error);
         } else if (comment) {
-          // Increment comments_count on post and notify author
-          try {
-            const admin = createAdminClient();
-            const { data: currentPost } = await admin
-              .from("posts")
-              .select("comments_count, author_id, title")
-              .eq("id", postId)
-              .single();
-
-            if (currentPost) {
-              const { count: exactCommentCount } = await admin
-                .from("comments")
-                .select("id", { count: "exact", head: true })
-                .eq("post_id", postId);
-
-              const newCount =
-                typeof exactCommentCount === "number"
-                  ? exactCommentCount
-                  : (currentPost.comments_count || 0) + 1;
-
-              await admin
+          // Asynchronously increment comments_count and notify author without blocking the response
+          (async () => {
+            try {
+              const admin = createAdminClient();
+              const { data: currentPost } = await admin
                 .from("posts")
-                .update({ comments_count: newCount })
-                .eq("id", postId);
+                .select("comments_count, author_id, title")
+                .eq("id", postId)
+                .single();
 
-              // Notify author if not commenting on own post
-              if (currentPost.author_id !== user.id) {
-                await admin.from("notifications").insert({
-                  recipient_id: currentPost.author_id,
-                  actor_id: user.id,
-                  notification_type: "comment",
-                  reference_id: postId,
-                  is_read: false,
-                });
+              if (currentPost) {
+                const { count: exactCommentCount } = await admin
+                  .from("comments")
+                  .select("id", { count: "exact", head: true })
+                  .eq("post_id", postId);
 
-                // Real-time broadcast dispatch
-                try {
-                  const channel = admin.channel(`user-notifications-${currentPost.author_id}`);
-                  await channel.send({
-                    type: "broadcast",
-                    event: "new_notification",
-                    payload: {
-                      notification_type: "comment",
-                      reference_id: postId,
-                      actor: authorMeta,
-                      comment_text: content.slice(0, 80),
-                      post_title: currentPost.title || undefined,
-                    },
+                const newCount =
+                  typeof exactCommentCount === "number"
+                    ? exactCommentCount
+                    : (currentPost.comments_count || 0) + 1;
+
+                await admin
+                  .from("posts")
+                  .update({ comments_count: newCount })
+                  .eq("id", postId);
+
+                // Notify author if not commenting on own post
+                if (currentPost.author_id !== user.id) {
+                  await admin.from("notifications").insert({
+                    recipient_id: currentPost.author_id,
+                    actor_id: user.id,
+                    notification_type: "comment",
+                    reference_id: postId,
+                    is_read: false,
                   });
-                } catch {}
+
+                  // Real-time broadcast dispatch
+                  try {
+                    const channel = admin.channel(`user-notifications-${currentPost.author_id}`);
+                    await channel.send({
+                      type: "broadcast",
+                      event: "new_notification",
+                      payload: {
+                        notification_type: "comment",
+                        reference_id: postId,
+                        actor: authorMeta,
+                        comment_text: content.slice(0, 80),
+                        post_title: currentPost.title || undefined,
+                      },
+                    });
+                  } catch {}
+                }
               }
+            } catch (notifErr) {
+              console.warn("Notification trigger warning:", notifErr);
             }
-          } catch (notifErr) {
-            console.warn("Notification trigger warning:", notifErr);
-          }
+          })();
 
           const verifiedData = await getVerifiedEntities();
           const enrichedComment = {

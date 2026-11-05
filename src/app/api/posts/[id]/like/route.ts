@@ -58,37 +58,6 @@ export async function POST(
         });
         liked = true;
 
-        // Notify post author if liked by someone else
-        const { data: currentPost } = await supabase
-          .from("posts")
-          .select("author_id")
-          .eq("id", postId)
-          .single();
-
-        if (currentPost && currentPost.author_id !== user.id) {
-          const admin = createAdminClient();
-          await admin.from("notifications").insert({
-            recipient_id: currentPost.author_id,
-            actor_id: user.id,
-            notification_type: "like",
-            reference_id: postId,
-            is_read: false,
-          });
-
-          // Real-time broadcast dispatch
-          try {
-            const channel = admin.channel(`user-notifications-${currentPost.author_id}`);
-            await channel.send({
-              type: "broadcast",
-              event: "new_notification",
-              payload: {
-                notification_type: "like",
-                reference_id: postId,
-                actor: userMeta,
-              },
-            });
-          } catch {}
-        }
       }
 
       // Query exact live like count from Supabase
@@ -100,11 +69,45 @@ export async function POST(
 
       const count = typeof supaLikesCount === "number" ? supaLikesCount : (liked ? 1 : 0);
 
-      // Keep post.likes_count column updated in DB (using admin to bypass author-only RLS)
-      await admin
-        .from("posts")
-        .update({ likes_count: count })
-        .eq("id", postId);
+      // Async background tasks: persist count on post row and notify author
+      (async () => {
+        try {
+          await admin.from("posts").update({ likes_count: count }).eq("id", postId);
+
+          if (liked) {
+            const { data: currentPost } = await admin
+              .from("posts")
+              .select("author_id")
+              .eq("id", postId)
+              .single();
+
+            if (currentPost && currentPost.author_id !== user.id) {
+              await admin.from("notifications").insert({
+                recipient_id: currentPost.author_id,
+                actor_id: user.id,
+                notification_type: "like",
+                reference_id: postId,
+                is_read: false,
+              });
+
+              try {
+                const channel = admin.channel(`user-notifications-${currentPost.author_id}`);
+                await channel.send({
+                  type: "broadcast",
+                  event: "new_notification",
+                  payload: {
+                    notification_type: "like",
+                    reference_id: postId,
+                    actor: userMeta,
+                  },
+                });
+              } catch {}
+            }
+          }
+        } catch (bgErr) {
+          console.warn("Background like task error:", bgErr);
+        }
+      })();
 
       return NextResponse.json({ liked, count });
     } catch (err) {

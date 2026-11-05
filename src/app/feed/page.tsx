@@ -11,12 +11,29 @@ import { ScrollableNav } from "@/components/ui/ScrollableNav";
 let cachedFeedPosts: Record<string, Post[]> = {};
 let cachedTrendingTags: { tag: string; count: number }[] = [];
 
+function getInitialFeedPosts(): Post[] {
+  if (cachedFeedPosts["latest:"]?.length) return cachedFeedPosts["latest:"];
+  if (typeof window !== "undefined") {
+    try {
+      const saved = sessionStorage.getItem("codesphere_feed_cache");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cachedFeedPosts["latest:"] = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return [];
+}
+
 export default function FeedPage() {
   const [activeTab, setActiveTab] = useState<"latest" | "questions">("latest");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [posts, setPosts] = useState<Post[]>(() => cachedFeedPosts["latest:"] || cachedFeedPosts["latest"] || []);
+  const [posts, setPosts] = useState<Post[]>(getInitialFeedPosts);
   const [trendingTags, setTrendingTags] = useState<{ tag: string; count: number }[]>(() => cachedTrendingTags);
-  const [loading, setLoading] = useState(() => !cachedFeedPosts["latest:"]?.length && !cachedFeedPosts["latest"]?.length);
+  const [loading, setLoading] = useState(() => getInitialFeedPosts().length === 0);
   const user = useUserStore((s) => s.user);
   const profile = useUserStore((s) => s.profile);
   const currentUser = useMemo(() => {
@@ -57,6 +74,11 @@ export default function FeedPage() {
       const data = await res.json();
       if (data.posts) {
         cachedFeedPosts[cacheKey] = data.posts;
+        if (cacheKey === "latest:") {
+          try {
+            sessionStorage.setItem("codesphere_feed_cache", JSON.stringify(data.posts));
+          } catch {}
+        }
         if (tabToFetch === activeTab && tagToFetch === selectedTag) {
           setPosts(data.posts);
         }

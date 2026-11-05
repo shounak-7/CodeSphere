@@ -25,39 +25,36 @@ export async function GET(request: Request) {
   let collections: any[] = [];
 
   try {
-    // Search public profiles (matching username or full_name)
-    const { data: p } = await supabase
-      .from("profiles")
-      .select("id, username, full_name, avatar_url, bio, college")
-      .or(`username.ilike.%${q}%,full_name.ilike.%${q}%`)
-      .limit(10);
-    if (p) profiles = p;
+    // Parallelize public profiles, programs, posts, and collections search
+    const [pRes, prRes, poRes, cRes] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id, username, full_name, avatar_url, bio, college")
+        .or(`username.ilike.%${q}%,full_name.ilike.%${q}%`)
+        .limit(10),
+      supabase
+        .from("programs")
+        .select("id, title, description, category, tags, created_at, owner:profiles!programs_owner_id_fkey(username, full_name)")
+        .eq("visibility", "public")
+        .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+        .limit(15),
+      supabase
+        .from("posts")
+        .select("id, title, content, post_type, created_at, author:profiles!posts_author_id_fkey(username, full_name, avatar_url)")
+        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+        .limit(15),
+      supabase
+        .from("collections")
+        .select("id, title, description, tags, created_at, owner:profiles!collections_owner_id_fkey(username, full_name)")
+        .eq("visibility", "public")
+        .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
+        .limit(10),
+    ]);
 
-    // Search ONLY PUBLIC programs
-    const { data: pr } = await supabase
-      .from("programs")
-      .select("id, title, description, category, tags, created_at, owner:profiles!programs_owner_id_fkey(username, full_name)")
-      .eq("visibility", "public")
-      .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
-      .limit(15);
-    if (pr) programs = pr;
-
-    // Search public posts
-    const { data: po } = await supabase
-      .from("posts")
-      .select("id, title, content, post_type, created_at, author:profiles!posts_author_id_fkey(username, full_name, avatar_url)")
-      .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
-      .limit(15);
-    if (po) posts = po;
-
-    // Search public collections
-    const { data: c } = await supabase
-      .from("collections")
-      .select("id, title, description, tags, created_at, owner:profiles!collections_owner_id_fkey(username, full_name)")
-      .eq("visibility", "public")
-      .or(`title.ilike.%${q}%,description.ilike.%${q}%`)
-      .limit(10);
-    if (c) collections = c;
+    if (pRes.data) profiles = pRes.data;
+    if (prRes.data) programs = prRes.data;
+    if (poRes.data) posts = poRes.data;
+    if (cRes.data) collections = cRes.data;
   } catch {
     // Ignore Supabase errors and fall back to local store below
   }
